@@ -1,0 +1,142 @@
+from enum import StrEnum
+
+
+class TrustTier(StrEnum):
+    T1 = "T1"
+    T2 = "T2"
+    T3 = "T3"
+
+
+class SourceType(StrEnum):
+    COMPANY = "COMPANY"
+    REGULATOR = "REGULATOR"
+    GOVERNMENT = "GOVERNMENT"
+    INDUSTRY_RESEARCH = "INDUSTRY_RESEARCH"
+    FINANCIAL_MEDIA = "FINANCIAL_MEDIA"
+    SOCIAL = "SOCIAL"
+    FORUM = "FORUM"
+
+
+class FactType(StrEnum):
+    OBSERVED_FACT = "OBSERVED_FACT"
+    COMPANY_GUIDANCE = "COMPANY_GUIDANCE"
+    THIRD_PARTY_ESTIMATE = "THIRD_PARTY_ESTIMATE"
+    ANALYST_OPINION = "ANALYST_OPINION"
+    RUMOR = "RUMOR"
+    UNKNOWN = "UNKNOWN"
+
+
+class VerificationStatus(StrEnum):
+    VERIFIED = "VERIFIED"
+    MONITORED_NOT_TRUSTED = "MONITORED_NOT_TRUSTED"
+    UNVERIFIED = "UNVERIFIED"
+    CONFLICTED = "CONFLICTED"
+
+
+class PipelineState(StrEnum):
+    COLLECTED = "COLLECTED"
+    NORMALIZED = "NORMALIZED"
+    DEDUPED = "DEDUPED"
+    TRIAGED = "TRIAGED"
+    ANALYZED = "ANALYZED"
+    RED_TEAMED = "RED_TEAMED"
+    ADJUDICATED = "ADJUDICATED"
+    RENDERED = "RENDERED"
+    OPS_CHECKED = "OPS_CHECKED"
+    OUT_OF_SCOPE = "OUT_OF_SCOPE"
+    DUPLICATE = "DUPLICATE"
+    UNVERIFIED = "UNVERIFIED"
+    CONFLICTED = "CONFLICTED"
+    INSUFFICIENT_EVIDENCE = "INSUFFICIENT_EVIDENCE"
+    REJECTED = "REJECTED"
+    FAILED = "FAILED"
+
+
+class SignalLevel(StrEnum):
+    S0 = "S0"
+    S1 = "S1"
+    S2 = "S2"
+    S3 = "S3"
+
+
+class Direction(StrEnum):
+    SUPPORTS = "SUPPORTS"
+    CHALLENGES = "CHALLENGES"
+    NEUTRAL = "NEUTRAL"
+
+
+class Adjudication(StrEnum):
+    DROP = "DROP"
+    ARCHIVE = "ARCHIVE"
+    INCLUDE_WEEKLY = "INCLUDE_WEEKLY"
+    SEND_ALERT = "SEND_ALERT"
+    REQUEST_HUMAN_REVIEW = "REQUEST_HUMAN_REVIEW"
+
+
+class RedTeamAction(StrEnum):
+    CHALLENGE = "CHALLENGE"
+    DOWNGRADE = "DOWNGRADE"
+    RESURRECT = "RESURRECT"
+    NO_CHANGE = "NO_CHANGE"
+
+
+class ThesisDirection(StrEnum):
+    STRENGTHEN = "STRENGTHEN"
+    WEAKEN = "WEAKEN"
+    NEUTRAL = "NEUTRAL"
+    UNCERTAIN = "UNCERTAIN"
+
+
+class ReplayMode(StrEnum):
+    DETERMINISTIC = "DETERMINISTIC"
+    FROZEN_OUTPUT = "FROZEN_OUTPUT"
+    LIVE_MODEL = "LIVE_MODEL"
+
+
+class RunStatus(StrEnum):
+    RUNNING = "RUNNING"
+    READY_FOR_OPS = "READY_FOR_OPS"
+    PASSED = "PASSED"
+    FAILED = "FAILED"
+    FAILED_OPS_CHECK = "FAILED_OPS_CHECK"
+
+
+class ThesisStatus(StrEnum):
+    ACTIVE = "ACTIVE"
+    SUPERSEDED = "SUPERSEDED"
+    ARCHIVED = "ARCHIVED"
+
+
+class DeliveryStatus(StrEnum):
+    LOCAL_RENDERED = "LOCAL_RENDERED"
+    BLOCKED = "BLOCKED"
+
+
+class FetchStatus(StrEnum):
+    RUNNING = "RUNNING"
+    PASSED = "PASSED"
+    NOT_MODIFIED = "NOT_MODIFIED"
+    FAILED = "FAILED"
+
+
+class ValueKind(StrEnum):
+    TEXT = "TEXT"
+    NUMBER = "NUMBER"
+    DATE = "DATE"
+
+
+class MissingMarker(StrEnum):
+    UNKNOWN = "UNKNOWN"
+    NA = "N/A"
+    UNVERIFIED = "UNVERIFIED"
+
+
+TERMINAL_PIPELINE_STATES = {
+    PipelineState.OUT_OF_SCOPE,
+    PipelineState.DUPLICATE,
+    PipelineState.UNVERIFIED,
+    PipelineState.CONFLICTED,
+    PipelineState.INSUFFICIENT_EVIDENCE,
+    PipelineState.REJECTED,
+    PipelineState.FAILED,
+}

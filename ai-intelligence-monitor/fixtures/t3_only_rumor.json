@@ -1,0 +1,16 @@
+{
+  "scenario": "t3_only_rumor",
+  "description": "A single anonymous forum claim requests S3 but is gated.",
+  "documents": [{
+    "fixture_id": "rumor-1",
+    "source": {"key": "anonymous-forum", "name": "Anonymous Supply Chain Forum", "source_type": "FORUM", "trust_tier": "T3", "url": "https://example.com/forum"},
+    "title": "Anonymous post claims a major HBM cancellation",
+    "url": "https://example.com/forum/post-1",
+    "published_at": "2026-07-03T08:00:00Z",
+    "raw_text": "An anonymous account claims a major customer cancelled HBM orders.",
+    "fact_type": "RUMOR", "verification_status": "MONITORED_NOT_TRUSTED", "event_key": "anonymous-hbm-cancellation", "event_summary": "Unverified anonymous cancellation claim.", "conflicted": false, "language": "en",
+    "analysis": {"affected_variable": "HBM orders", "direction": "CHALLENGES", "novelty": 90, "materiality": 95, "source_quality": 5, "signal_level": "S3", "facts": [{"statement": "An anonymous account claimed a major cancellation.", "fact_type": "RUMOR", "value_kind": "TEXT", "value": null, "source_refs": ["rumor-1"], "missing_marker": null}], "marginal_change": "A potentially material but unverified claim.", "thesis_impact": "Cannot be assessed without confirmation.", "unknowns": ["Customer identity", "Order volume", "Whether any cancellation occurred"], "next_validation": "Seek T1 confirmation or two independent T2 sources.", "adjudication": "REQUEST_HUMAN_REVIEW", "out_of_scope": false},
+    "red_team": null
+  }]
+}
+

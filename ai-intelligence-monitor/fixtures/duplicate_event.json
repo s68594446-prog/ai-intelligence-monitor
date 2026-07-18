@@ -1,0 +1,29 @@
+{
+  "scenario": "duplicate_event",
+  "description": "Two sources report one qualification event.",
+  "documents": [
+    {
+      "fixture_id": "dup-1",
+      "source": {"key": "company-ir", "name": "MemoryCo IR", "source_type": "COMPANY", "trust_tier": "T1", "url": "https://example.com/memoryco"},
+      "title": "MemoryCo completes routine HBM qualification milestone",
+      "url": "https://example.com/memoryco/qualification",
+      "published_at": "2026-07-02T08:00:00Z",
+      "raw_text": "MemoryCo completed a previously guided qualification milestone.",
+      "fact_type": "OBSERVED_FACT", "verification_status": "VERIFIED", "event_key": "memoryco-routine-qualification", "event_summary": "A previously guided milestone is completed.", "conflicted": false, "language": "en",
+      "analysis": {"affected_variable": "customer qualification", "direction": "NEUTRAL", "novelty": 25, "materiality": 20, "source_quality": 100, "signal_level": "S1", "facts": [{"statement": "The previously guided qualification milestone was completed.", "fact_type": "OBSERVED_FACT", "value_kind": "TEXT", "value": null, "source_refs": ["dup-1"], "missing_marker": null}], "marginal_change": "Execution matched prior guidance.", "thesis_impact": "No thesis change.", "unknowns": [], "next_validation": "Watch production shipment disclosure.", "adjudication": "ARCHIVE", "out_of_scope": false},
+      "red_team": null
+    },
+    {
+      "fixture_id": "dup-2",
+      "source": {"key": "industry-media", "name": "Industry Media", "source_type": "INDUSTRY_RESEARCH", "trust_tier": "T2", "url": "https://example.com/industry"},
+      "title": "MemoryCo reaches HBM qualification milestone",
+      "url": "https://example.com/industry/qualification",
+      "published_at": "2026-07-02T09:00:00Z",
+      "raw_text": "Industry Media repeated MemoryCo's qualification announcement.",
+      "fact_type": "OBSERVED_FACT", "verification_status": "VERIFIED", "event_key": "memoryco-routine-qualification", "event_summary": "The same previously guided milestone.", "conflicted": false, "language": "en",
+      "analysis": {"affected_variable": "customer qualification", "direction": "NEUTRAL", "novelty": 0, "materiality": 20, "source_quality": 70, "signal_level": "S1", "facts": [{"statement": "Industry Media repeated the company announcement.", "fact_type": "OBSERVED_FACT", "value_kind": "TEXT", "value": null, "source_refs": ["dup-2"], "missing_marker": null}], "marginal_change": "No incremental fact.", "thesis_impact": "No thesis change.", "unknowns": [], "next_validation": "Watch production shipment disclosure.", "adjudication": "ARCHIVE", "out_of_scope": false},
+      "red_team": null
+    }
+  ]
+}
+

@@ -1,0 +1,23 @@
+{
+  "scenario": "conflicted_sources",
+  "description": "Two reliable sources make conflicting capacity statements.",
+  "documents": [
+    {
+      "fixture_id": "conflict-1",
+      "source": {"key": "regulator", "name": "Exchange Filing", "source_type": "REGULATOR", "trust_tier": "T1", "url": "https://example.com/exchange"},
+      "title": "Filing says capacity expansion remains paused",
+      "url": "https://example.com/exchange/filing-a", "published_at": "2026-07-04T08:00:00Z", "raw_text": "The filing says capacity expansion remains paused.", "fact_type": "COMPANY_GUIDANCE", "verification_status": "CONFLICTED", "event_key": "capacity-expansion-conflict", "event_summary": "Reliable sources conflict on capacity status.", "conflicted": true, "language": "en",
+      "analysis": {"affected_variable": "capacity", "direction": "CHALLENGES", "novelty": 90, "materiality": 90, "source_quality": 100, "signal_level": "S3", "facts": [{"statement": "The exchange filing says expansion remains paused.", "fact_type": "COMPANY_GUIDANCE", "value_kind": "TEXT", "value": null, "source_refs": ["conflict-1", "conflict-2"], "missing_marker": null}], "marginal_change": "The capacity outlook is internally inconsistent across reliable evidence.", "thesis_impact": "Could challenge supply discipline, but direction is unresolved.", "unknowns": ["Which disclosure reflects the current plan"], "next_validation": "Request human review and wait for an amended filing.", "adjudication": "REQUEST_HUMAN_REVIEW", "out_of_scope": false},
+      "red_team": {"action": "CHALLENGE", "resulting_level": "S3", "assumption_at_risk": "Manufacturers retain capital discipline.", "alternative_explanation": "The releases may refer to different facilities.", "confirmation_bias": "Either bullish or bearish readers may select only one source.", "market_knowledge": "Both statements are public.", "cannot_prove": "Neither alone proves total effective capacity.", "next_validation": "Wait for amended facility-level guidance.", "worst_position_risk": "Unexpected effective supply could reverse pricing."}
+    },
+    {
+      "fixture_id": "conflict-2",
+      "source": {"key": "government", "name": "Government Permit Registry", "source_type": "GOVERNMENT", "trust_tier": "T1", "url": "https://example.com/permits"},
+      "title": "Permit registry says capacity expansion started",
+      "url": "https://example.com/permits/permit-b", "published_at": "2026-07-04T09:00:00Z", "raw_text": "The permit registry says expansion construction started.", "fact_type": "OBSERVED_FACT", "verification_status": "CONFLICTED", "event_key": "capacity-expansion-conflict", "event_summary": "Reliable sources conflict on capacity status.", "conflicted": true, "language": "en",
+      "analysis": {"affected_variable": "capacity", "direction": "CHALLENGES", "novelty": 90, "materiality": 90, "source_quality": 100, "signal_level": "S3", "facts": [{"statement": "The permit registry says construction started.", "fact_type": "OBSERVED_FACT", "value_kind": "TEXT", "value": null, "source_refs": ["conflict-2"], "missing_marker": null}], "marginal_change": "Conflicting evidence.", "thesis_impact": "Unresolved.", "unknowns": [], "next_validation": "Wait for clarification.", "adjudication": "REQUEST_HUMAN_REVIEW", "out_of_scope": false},
+      "red_team": {"action": "CHALLENGE", "resulting_level": "S3", "assumption_at_risk": "Manufacturers retain capital discipline.", "alternative_explanation": "Permitting does not prove installed output.", "confirmation_bias": "Construction may be overweighted.", "market_knowledge": "Permit is public.", "cannot_prove": "A permit cannot prove production capacity.", "next_validation": "Observe equipment installation.", "worst_position_risk": "Supply expands faster than demand."}
+    }
+  ]
+}
+

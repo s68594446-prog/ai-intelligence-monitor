@@ -1,0 +1,74 @@
+registry_version: "dram-hbm-sources-v1"
+coverage_id: dram_hbm
+sources:
+  - source_id: micron_ir_latest_news
+    name: Micron Technology Investor Relations — Latest News
+    enabled: true
+    source_tier: T1
+    role: DIRECT
+    discovery_method: HTML_INDEX
+    index_url: https://investors.micron.com/latest-news-english
+    allowed_domains: [investors.micron.com, micron.com, www.micron.com]
+    article_url_patterns: ["^https://investors\\.micron\\.com/news-releases/news-release-details/"]
+    body_selectors: [".node__content", "article", "main"]
+    language: en
+    max_items_per_run: 10
+    request_timeout_seconds: 20
+    minimum_interval_seconds: 1
+    relevance_terms: [hbm, dram, ddr, lpddr, gddr, socamm, memory, capex, financial results, customer qualification, mass production, sampling, capacity]
+    exclusion_terms: [board appointment, dividend, proxy statement]
+    notes: Direct DRAM/HBM company source.
+
+  - source_id: samsung_semiconductor_newsroom
+    name: Samsung Global Newsroom — Semiconductors
+    enabled: true
+    source_tier: T1
+    role: DIRECT
+    discovery_method: HTML_INDEX
+    index_url: https://news.samsung.com/global/category/products/semiconductors
+    allowed_domains: [news.samsung.com]
+    article_url_patterns: ["^https://news\\.samsung\\.com/global/"]
+    body_selectors: ["article", ".article-content", ".text-box", "main"]
+    language: en
+    max_items_per_run: 10
+    request_timeout_seconds: 20
+    minimum_interval_seconds: 1
+    relevance_terms: [hbm, dram, ddr, lpddr, gddr, memory, customer qualification, sampling, shipment, mass production, ai infrastructure]
+    exclusion_terms: [smartphone, television, appliance, mobile experience]
+    notes: Direct semiconductor company newsroom source.
+
+  - source_id: nvidia_press_release_rss
+    name: NVIDIA Official Press Release RSS
+    enabled: true
+    source_tier: T1
+    role: DEPENDENCY_SENTINEL
+    discovery_method: RSS
+    feed_url: https://nvidianews.nvidia.com/cats/press_release.xml
+    allowed_domains: [nvidianews.nvidia.com, investor.nvidia.com, nvidia.com, www.nvidia.com]
+    article_url_patterns: ["^https://nvidianews\\.nvidia\\.com/"]
+    body_selectors: ["article", ".article-body", "main"]
+    language: en
+    max_items_per_run: 10
+    request_timeout_seconds: 20
+    minimum_interval_seconds: 1
+    relevance_terms: [blackwell, rubin, gpu shipment, ai factory, ai server, data center, memory bandwidth, hbm, hyperscaler deployment, platform delay, platform acceleration]
+    exclusion_terms: [gaming, geforce, robot, robotics, automotive, healthcare, software release]
+    notes: Dependency sentinel only when the item explicitly affects DRAM/HBM demand.
+
+  - source_id: sk_hynix_press_release
+    name: SK hynix Newsroom — Press Release
+    enabled: false
+    source_tier: T1
+    role: DIRECT
+    discovery_method: HTML_INDEX
+    index_url: https://news.skhynix.com/press-center/press-release/
+    allowed_domains: [news.skhynix.com]
+    article_url_patterns: ["^https://news\\.skhynix\\.com/"]
+    body_selectors: ["article", ".entry-content", "main"]
+    language: en
+    max_items_per_run: 10
+    request_timeout_seconds: 20
+    minimum_interval_seconds: 1
+    relevance_terms: [hbm, dram, ddr, lpddr, gddr, memory, capacity, mass production, sampling]
+    exclusion_terms: []
+    notes: Disabled because the official page returned 403; do not bypass it.

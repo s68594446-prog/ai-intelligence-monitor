@@ -1,0 +1,39 @@
+{
+  "scenario": "no_material_change",
+  "description": "Duplicate generic AI application news that cannot map to coverage.",
+  "documents": [
+    {
+      "fixture_id": "noise-1",
+      "source": {"key": "media-a", "name": "General Tech Media A", "source_type": "FINANCIAL_MEDIA", "trust_tier": "T2", "url": "https://example.com/media-a"},
+      "title": "Consumer chatbot adds a theme picker",
+      "url": "https://example.com/media-a/chatbot-theme",
+      "published_at": "2026-07-01T09:00:00Z",
+      "raw_text": "A consumer AI application added a visual theme picker.",
+      "fact_type": "OBSERVED_FACT",
+      "verification_status": "VERIFIED",
+      "event_key": "chatbot-theme-picker",
+      "event_summary": "Generic AI application feature.",
+      "analysis": {"affected_variable": "none", "direction": "NEUTRAL", "novelty": 5, "materiality": 0, "source_quality": 60, "signal_level": "S0", "facts": [{"statement": "A consumer AI application added a theme picker.", "fact_type": "OBSERVED_FACT", "value_kind": "TEXT", "value": null, "source_refs": ["noise-1"], "missing_marker": null}], "marginal_change": "None for DRAM/HBM coverage.", "thesis_impact": "None.", "unknowns": [], "next_validation": "N/A", "adjudication": "DROP", "out_of_scope": true},
+      "red_team": null,
+      "conflicted": false,
+      "language": "en"
+    },
+    {
+      "fixture_id": "noise-2",
+      "source": {"key": "media-b", "name": "General Tech Media B", "source_type": "FINANCIAL_MEDIA", "trust_tier": "T2", "url": "https://example.com/media-b"},
+      "title": "Chatbot theme picker launches",
+      "url": "https://example.com/media-b/chatbot-theme",
+      "published_at": "2026-07-01T10:00:00Z",
+      "raw_text": "The same consumer AI application theme picker was reported again.",
+      "fact_type": "OBSERVED_FACT",
+      "verification_status": "VERIFIED",
+      "event_key": "chatbot-theme-picker",
+      "event_summary": "Duplicate generic AI application feature.",
+      "analysis": {"affected_variable": "none", "direction": "NEUTRAL", "novelty": 0, "materiality": 0, "source_quality": 60, "signal_level": "S0", "facts": [{"statement": "A theme picker was reported again.", "fact_type": "OBSERVED_FACT", "value_kind": "TEXT", "value": null, "source_refs": ["noise-2"], "missing_marker": null}], "marginal_change": "None.", "thesis_impact": "None.", "unknowns": [], "next_validation": "N/A", "adjudication": "DROP", "out_of_scope": true},
+      "red_team": null,
+      "conflicted": false,
+      "language": "en"
+    }
+  ]
+}
+

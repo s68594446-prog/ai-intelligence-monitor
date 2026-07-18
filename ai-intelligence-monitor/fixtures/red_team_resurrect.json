@@ -1,0 +1,13 @@
+{
+  "scenario": "red_team_resurrect",
+  "description": "A discarded policy item is restored because it maps to an export-policy sentinel.",
+  "documents": [{
+    "fixture_id": "resurrect-1",
+    "source": {"key": "regulator", "name": "Trade Regulator", "source_type": "REGULATOR", "trust_tier": "T1", "url": "https://example.com/regulator"},
+    "title": "Trade regulator opens memory-equipment rule consultation",
+    "url": "https://example.com/regulator/consultation", "published_at": "2026-07-07T08:00:00Z", "raw_text": "The regulator opened a formal consultation on memory-equipment export rules.", "fact_type": "OBSERVED_FACT", "verification_status": "VERIFIED", "event_key": "memory-export-consultation", "event_summary": "A formal policy process could affect a dependency sentinel.", "conflicted": false, "language": "en",
+    "analysis": {"affected_variable": "semiconductor export policy", "direction": "NEUTRAL", "novelty": 80, "materiality": 20, "source_quality": 100, "signal_level": "S0", "facts": [{"statement": "The regulator opened a formal memory-equipment rule consultation.", "fact_type": "OBSERVED_FACT", "value_kind": "DATE", "value": "2026-07-07", "source_refs": ["resurrect-1"], "missing_marker": null}], "marginal_change": "Initially discarded as a consultation with no final rule.", "thesis_impact": "Not yet assessed.", "unknowns": ["Final scope"], "next_validation": "Track the draft rule text.", "adjudication": "DROP", "out_of_scope": false},
+    "red_team": {"action": "RESURRECT", "resulting_level": "S2", "assumption_at_risk": "CXMT effective capacity ramps as expected.", "alternative_explanation": "The consultation may end without material restrictions.", "confirmation_bias": "Initial triage may underweight policy lead indicators.", "market_knowledge": "The consultation is public but implications are unresolved.", "cannot_prove": "It cannot prove a restriction will be adopted.", "next_validation": "Review draft scope and covered equipment classifications.", "worst_position_risk": "A final rule materially changes effective Chinese DRAM capacity growth."}
+  }]
+}
+

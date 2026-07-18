@@ -1,0 +1,13 @@
+{
+  "scenario": "red_team_downgrade",
+  "description": "A T1 S3 candidate is downgraded after alternative explanation review.",
+  "documents": [{
+    "fixture_id": "downgrade-1",
+    "source": {"key": "company-ir", "name": "MemoryCo IR", "source_type": "COMPANY", "trust_tier": "T1", "url": "https://example.com/memoryco"},
+    "title": "MemoryCo delays one equipment delivery",
+    "url": "https://example.com/memoryco/equipment", "published_at": "2026-07-06T08:00:00Z", "raw_text": "MemoryCo delayed one equipment delivery while maintaining annual capacity guidance.", "fact_type": "COMPANY_GUIDANCE", "verification_status": "VERIFIED", "event_key": "memoryco-equipment-delay", "event_summary": "A delivery is delayed without a guide change.", "conflicted": false, "language": "en",
+    "analysis": {"affected_variable": "capacity", "direction": "SUPPORTS", "novelty": 85, "materiality": 90, "source_quality": 100, "signal_level": "S3", "facts": [{"statement": "MemoryCo delayed one equipment delivery and maintained annual capacity guidance.", "fact_type": "COMPANY_GUIDANCE", "value_kind": "TEXT", "value": null, "source_refs": ["downgrade-1"], "missing_marker": null}], "marginal_change": "Potential near-term capacity delay.", "thesis_impact": "Initially appears to strengthen supply discipline.", "unknowns": ["Delivery timing"], "next_validation": "Check annual capacity guidance next quarter.", "adjudication": "SEND_ALERT", "out_of_scope": false},
+    "red_team": {"action": "DOWNGRADE", "resulting_level": "S2", "assumption_at_risk": "Manufacturers retain capital discipline.", "alternative_explanation": "A logistics delay with unchanged annual guidance is timing, not discipline.", "confirmation_bias": "A bullish memory view may overread a single delivery.", "market_knowledge": "The company disclosed unchanged annual guidance.", "cannot_prove": "It cannot prove annual effective capacity is lower.", "next_validation": "Observe actual equipment installation and annual bit-supply guidance.", "worst_position_risk": "The equipment arrives later and capacity is unaffected."}
+  }]
+}
+

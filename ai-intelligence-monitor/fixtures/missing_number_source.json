@@ -1,0 +1,13 @@
+{
+  "scenario": "missing_number_source",
+  "description": "An S2 numeric claim intentionally lacks a source reference.",
+  "documents": [{
+    "fixture_id": "missing-num-1",
+    "source": {"key": "industry-research", "name": "Industry Research", "source_type": "INDUSTRY_RESEARCH", "trust_tier": "T2", "url": "https://example.com/research"},
+    "title": "Research note discusses DRAM inventory",
+    "url": "https://example.com/research/inventory", "published_at": "2026-07-05T08:00:00Z", "raw_text": "A fixture note contains an intentionally unsourced inventory number.", "fact_type": "THIRD_PARTY_ESTIMATE", "verification_status": "UNVERIFIED", "event_key": "dram-inventory-estimate", "event_summary": "Inventory estimate with broken evidence linkage.", "conflicted": false, "language": "en",
+    "analysis": {"affected_variable": "inventory", "direction": "CHALLENGES", "novelty": 70, "materiality": 70, "source_quality": 60, "signal_level": "S2", "facts": [{"statement": "DRAM inventory allegedly rose 40 percent.", "fact_type": "THIRD_PARTY_ESTIMATE", "value_kind": "NUMBER", "value": "+40%", "source_refs": [], "missing_marker": null}], "marginal_change": "Inventory may be rising.", "thesis_impact": "Would reduce confidence in tight supply.", "unknowns": ["Methodology"], "next_validation": "Find a source-backed inventory series.", "adjudication": "INCLUDE_WEEKLY", "out_of_scope": false},
+    "red_team": {"action": "CHALLENGE", "resulting_level": "S2", "assumption_at_risk": "HBM inventory does not accumulate.", "alternative_explanation": "Channel mix may distort the estimate.", "confirmation_bias": "A bearish reader may accept an unsourced number.", "market_knowledge": "Unknown.", "cannot_prove": "It cannot prove end-demand weakness.", "next_validation": "Obtain disclosed inventory data.", "worst_position_risk": "Inventory liquidation pressures pricing."}
+  }]
+}
+

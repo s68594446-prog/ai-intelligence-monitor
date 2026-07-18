@@ -1,0 +1,45 @@
+{
+  "scenario": "verified_s3",
+  "description": "A T1 disclosure directly challenges the cloud CapEx assumption.",
+  "documents": [{
+    "fixture_id": "verified-s3-doc-1",
+    "source": {"key": "cloud-ir", "name": "CloudCo Investor Relations", "source_type": "COMPANY", "trust_tier": "T1", "url": "https://example.com/cloudco/ir"},
+    "title": "CloudCo cuts AI infrastructure capital plan",
+    "url": "https://example.com/cloudco/ir/capex-update",
+    "published_at": "2026-07-01T08:00:00Z",
+    "language": "en",
+    "raw_text": "CloudCo formally reduced its 2026 AI infrastructure capital plan by 25 percent.",
+    "fact_type": "COMPANY_GUIDANCE",
+    "verification_status": "VERIFIED",
+    "event_key": "cloudco-capex-cut-2026q3",
+    "event_summary": "Formal guidance reduces an important HBM demand sentinel.",
+    "conflicted": false,
+    "analysis": {
+      "affected_variable": "cloud provider CapEx",
+      "direction": "CHALLENGES",
+      "novelty": 95,
+      "materiality": 95,
+      "source_quality": 100,
+      "signal_level": "S3",
+      "facts": [{"statement": "CloudCo reduced its 2026 AI infrastructure capital plan by 25 percent.", "fact_type": "COMPANY_GUIDANCE", "value_kind": "NUMBER", "value": "-25%", "source_refs": ["verified-s3-doc-1"], "missing_marker": null}],
+      "marginal_change": "The first formal demand-side guide-down in the monitored fixture set.",
+      "thesis_impact": "Directly challenges the assumption that cloud provider CapEx continues to grow.",
+      "unknowns": ["Whether other cloud providers will follow."],
+      "next_validation": "Check the next two reported quarters of aggregate cloud CapEx.",
+      "adjudication": "SEND_ALERT",
+      "out_of_scope": false
+    },
+    "red_team": {
+      "action": "CHALLENGE",
+      "resulting_level": "S3",
+      "assumption_at_risk": "Cloud provider CapEx continues to grow.",
+      "alternative_explanation": "The reduction may reflect project timing rather than weaker accelerator demand.",
+      "confirmation_bias": "A bearish memory view could overweight one company.",
+      "market_knowledge": "The formal disclosure is public but cross-provider read-through may be incomplete.",
+      "cannot_prove": "It cannot prove aggregate HBM demand is contracting.",
+      "next_validation": "Observe aggregate cloud CapEx and accelerator orders for two quarters.",
+      "worst_position_risk": "A broad CapEx reversal could reduce HBM order visibility and loosen DRAM supply."
+    }
+  }]
+}
+

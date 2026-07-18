@@ -1,0 +1,86 @@
+version: "phase2-sources-v1"
+sources:
+  - key: micron_ir
+    name: Micron Technology Investor Relations
+    active: true
+    trust_tier: T1
+    source_type: COMPANY
+    mode: micron_ir_html
+    index_url: https://investors.micron.com/latest-news-english
+    allowed_hosts:
+      - investors.micron.com
+    allowed_path_prefixes:
+      - /latest-news-english
+      - /news-releases/news-release-details/
+    language: en
+    timezone: America/New_York
+    discovery_terms:
+      - hbm
+      - dram
+      - memory
+      - semiconductor
+      - data center
+      - ai infrastructure
+      - capex
+      - wafer
+      - fab
+    max_candidates: 50
+    default_limit: 5
+
+  - key: nvidia_newsroom
+    name: NVIDIA Newsroom Press Releases
+    active: true
+    trust_tier: T1
+    source_type: COMPANY
+    mode: rss_full
+    index_url: https://nvidianews.nvidia.com/releases.xml
+    allowed_hosts:
+      - nvidianews.nvidia.com
+    allowed_path_prefixes:
+      - /releases.xml
+      - /news/
+    language: en
+    timezone: UTC
+    required_categories:
+      - Press Releases
+    discovery_terms:
+      - hbm
+      - dram
+      - memory
+      - blackwell
+      - rubin
+      - gpu
+      - ai factory
+      - data center
+      - ai infrastructure
+      - semiconductor
+    max_candidates: 50
+    default_limit: 5
+
+  - key: samsung_global_newsroom
+    name: Samsung Global Newsroom
+    active: true
+    trust_tier: T1
+    source_type: COMPANY
+    mode: rss_full
+    index_url: https://news.samsung.com/global/feed/rss
+    allowed_hosts:
+      - news.samsung.com
+    allowed_path_prefixes:
+      - /global/feed/rss
+      - /global/
+    language: en
+    timezone: UTC
+    required_categories:
+      - Press Releases
+    discovery_terms:
+      - hbm
+      - dram
+      - memory
+      - semiconductor
+      - data center
+      - ai infrastructure
+      - server
+      - foundry
+    max_candidates: 50
+    default_limit: 5

@@ -1,0 +1,65 @@
+coverage_id: dram_hbm
+name: DRAM / HBM
+version: "1.0.0"
+objective: Detect evidence-backed marginal changes that could alter the DRAM/HBM supply-demand thesis.
+selected: true
+entities:
+  - SK Hynix
+  - Samsung Electronics
+  - Micron
+  - CXMT
+products:
+  - HBM
+  - DRAM
+monitoring_variables:
+  - HBM pricing
+  - DRAM pricing
+  - inventory
+  - capacity
+  - yield
+  - customer qualification
+  - manufacturer capital expenditure
+dependency_sentinels:
+  - NVIDIA GPU demand
+  - cloud provider CapEx
+  - AI server shipments
+  - CoWoS capacity
+  - semiconductor export policy
+exclusions:
+  - general AI application news
+  - generic foundation-model releases
+  - chip news unrelated to memory
+  - generic AI financing
+  - news that cannot map to a monitored variable
+thesis: HBM demand growth and advanced DRAM capacity migration continue to constrain conventional DRAM supply, keeping the memory cycle in an upswing.
+supporting_assumptions:
+  - Cloud provider CapEx continues to grow.
+  - HBM order visibility persists.
+  - HBM continues to consume advanced DRAM capacity.
+  - The three major memory manufacturers retain capital discipline.
+disconfirming_conditions:
+  - Cloud providers materially cut CapEx.
+  - HBM inventory begins to accumulate.
+  - Samsung HBM yield and qualification materially exceed the base case.
+  - CXMT effective capacity ramps materially faster than expected.
+  - Conventional DRAM supply recovers faster than demand grows.
+reverse_triggers:
+  - metric: aggregate_cloud_capex_yoy
+    observable_condition: Two consecutive reported quarters below 0 percent year-over-year.
+  - metric: hbm_inventory_days
+    observable_condition: Two consecutive disclosed observations above the prior twelve-month maximum.
+  - metric: samsung_hbm_customer_qualifications
+    observable_condition: Two named top-tier accelerator customers publicly confirm production qualification.
+  - metric: cxmt_effective_wafer_capacity
+    observable_condition: A T1 filing or two independent T2 sources confirm at least 30 percent year-over-year growth.
+  - metric: conventional_dram_bit_supply_vs_demand
+    observable_condition: T1 guidance shows bit-supply growth exceeding bit-demand growth for two consecutive quarters.
+related_positions:
+  - Memory manufacturers
+  - AI accelerator supply chain
+source_requirements:
+  primary_source_spine: true
+  t3_discovery_only: true
+  s3_minimum: one T1 or two independent T2 sources
+  numbers: source reference or UNKNOWN/N/A/UNVERIFIED
+
