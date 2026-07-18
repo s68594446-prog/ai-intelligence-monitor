@@ -174,6 +174,14 @@ def analyze_manual_document(
         replay_mode="LIVE_MODEL",
         manual_input_snapshot=snapshot,
     )
+    if app_settings.email_auto_send:
+        from app.delivery.coordinator import coordinate_post_ops_email_delivery
+
+        coordinate_post_ops_email_delivery(
+            session,
+            run.run_id,
+            app_settings=app_settings,
+        )
     return _analysis_response(session, run)
 
 

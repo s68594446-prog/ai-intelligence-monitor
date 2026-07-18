@@ -1,6 +1,6 @@
-# AI Intelligence Monitor — Phase 0–2
+# AI Intelligence Monitor — Phase 0–3A
 
-An auditable harness for dependency-based personal investment research. Phase 0 provides versioned coverage, evidence contracts, a controlled state machine, replay, deterministic operations checks, and fixture-driven tests. Phase 1 adds manually supplied DRAM/HBM source text and bounded OpenAI or DeepSeek structured analysis. Phase 2 adds manual, allowlisted collection from three official T1 sources. It still does not search the web, run a browser, schedule jobs, connect Gmail, send mail, provide investment advice, or expose a frontend.
+An auditable harness for dependency-based personal investment research. Phase 0 provides versioned coverage, evidence contracts, a controlled state machine, replay, deterministic operations checks, and fixture-driven tests. Phase 1 adds manually supplied DRAM/HBM source text and bounded OpenAI or DeepSeek structured analysis. Phase 2 adds manual, allowlisted collection from three official T1 sources. Phase 3A adds disabled-by-default, gated SMTP email delivery for an existing passed alert brief. It still does not search the web, run a browser, schedule jobs, connect Gmail, provide investment advice, or expose a frontend.
 
 ## Quick start
 
@@ -129,3 +129,15 @@ curl -X POST http://127.0.0.1:8000/api/manual-documents/<DOCUMENT_ID>/analyze
 ```
 
 At most 10 Documents and 3 analyses are allowed per run. Re-fetching the same canonical URL or normalized content reuses the existing Document and never calls the LLM again. Frozen-source replay uses only the saved local snapshots and never accesses the network.
+
+## Phase 3A controlled email delivery
+
+Email is disabled by default. The delivery service only accepts an existing, non-replay manual Analysis Run that passed Ops Check, contains an `OPS_CHECKED` S2/S3 `SEND_ALERT` Signal with Red Team output, and has its audited `05-brief.html` marked `PASSED`. SMTP supports only STARTTLS or SSL. Credentials belong only in the ignored `backend/.env`; recipient addresses are stored only as a SHA-256 fingerprint.
+
+The default CLI performs a local Gate check and never connects to SMTP:
+
+```bash
+python -m app.scripts.deliver_email --run-id <RUN_ID>
+```
+
+`--send` is the only path that permits SMTP delivery and must not be used without a separately approved real-email acceptance run. `EMAIL_AUTO_SEND=false` is the default. Phase 3A includes no scheduler, retry queue, Gmail/Outlook integration, attachments, tracking, or frontend. See [`docs/PHASE_3A.md`](docs/PHASE_3A.md) for Gate, idempotency, security, and SMTP limitations.

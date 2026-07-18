@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, DateTime, Enum as SAEnum, ForeignKey, Integer, String, Text, false
+from sqlalchemy import JSON, Boolean, DateTime, Enum as SAEnum, ForeignKey, Integer, String, Text, UniqueConstraint, false
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from app.core.enums import (
@@ -136,6 +136,10 @@ class Signal(Base):
 
 class DeliveryFeedback(Base):
     __tablename__ = "delivery_feedback"
+    __table_args__ = (
+        UniqueConstraint("idempotency_key", name="uq_delivery_feedback_idempotency_key"),
+        UniqueConstraint("run_id", "delivery_channel", name="uq_delivery_feedback_run_channel"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     signal_id: Mapped[int | None] = mapped_column(ForeignKey("signals.id"), nullable=True)
@@ -143,6 +147,13 @@ class DeliveryFeedback(Base):
     delivery_status: Mapped[DeliveryStatus] = mapped_column(enum_column(DeliveryStatus))
     rendered_path: Mapped[str] = mapped_column(String(1000))
     feedback: Mapped[str | None] = mapped_column(Text, nullable=True)
+    delivery_channel: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    idempotency_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    recipient_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    provider_message_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    attempted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 

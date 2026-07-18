@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -65,8 +65,32 @@ class Settings(BaseSettings):
     )
     llm_timeout_seconds: float = Field(default=60.0, gt=0, validation_alias="LLM_TIMEOUT_SECONDS")
     llm_max_retries: int = Field(default=2, ge=0, le=10, validation_alias="LLM_MAX_RETRIES")
+    email_delivery_enabled: bool = Field(default=False, validation_alias="EMAIL_DELIVERY_ENABLED")
+    email_auto_send: bool = Field(default=False, validation_alias="EMAIL_AUTO_SEND")
+    smtp_host: str | None = Field(default=None, validation_alias="SMTP_HOST")
+    smtp_port: int = Field(default=587, ge=1, le=65535, validation_alias="SMTP_PORT")
+    smtp_username: str | None = Field(default=None, validation_alias="SMTP_USERNAME")
+    smtp_password: SecretStr | None = Field(default=None, validation_alias="SMTP_PASSWORD")
+    smtp_from_address: str | None = Field(default=None, validation_alias="SMTP_FROM_ADDRESS")
+    smtp_to_addresses: str = Field(default="", validation_alias="SMTP_TO_ADDRESSES")
+    smtp_security: Literal["STARTTLS", "SSL"] = Field(
+        default="STARTTLS", validation_alias="SMTP_SECURITY"
+    )
+    smtp_timeout_seconds: float = Field(
+        default=20.0, gt=0, le=120, validation_alias="SMTP_TIMEOUT_SECONDS"
+    )
+    smtp_message_id_domain: str | None = Field(
+        default=None, validation_alias="SMTP_MESSAGE_ID_DOMAIN"
+    )
     analysis_prompt_path: Path = BACKEND_DIR / "app" / "prompts" / "analysis_v1.txt"
     red_team_prompt_path: Path = BACKEND_DIR / "app" / "prompts" / "red_team_v1.txt"
+
+    @field_validator("smtp_password", mode="before")
+    @classmethod
+    def normalize_empty_smtp_password(cls, value):
+        if value is None or value == "":
+            return None
+        return value
 
     model_config = SettingsConfigDict(
         env_prefix="AIM_",

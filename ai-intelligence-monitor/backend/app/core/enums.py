@@ -110,6 +110,10 @@ class ThesisStatus(StrEnum):
 class DeliveryStatus(StrEnum):
     LOCAL_RENDERED = "LOCAL_RENDERED"
     BLOCKED = "BLOCKED"
+    EMAIL_PENDING = "EMAIL_PENDING"
+    EMAIL_SENT = "EMAIL_SENT"
+    EMAIL_FAILED = "EMAIL_FAILED"
+    EMAIL_UNKNOWN = "EMAIL_UNKNOWN"
 
 
 class FetchStatus(StrEnum):
