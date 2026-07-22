@@ -1,0 +1,22 @@
+version: a-share-primary-sources-v1
+sources:
+  - id: sse_announcements
+    tier: T1
+    domains: [sse.com.cn, www.sse.com.cn, static.sse.com.cn]
+  - id: szse_announcements
+    tier: T1
+    domains: [szse.cn, www.szse.cn, disc.static.szse.cn]
+  - id: bse_announcements
+    tier: T1
+    domains: [bse.cn, www.bse.cn]
+  - id: cninfo_announcements
+    tier: T1
+    domains: [cninfo.com.cn, www.cninfo.com.cn, static.cninfo.com.cn]
+  - id: csrc
+    tier: T1
+    domains: [csrc.gov.cn, www.csrc.gov.cn]
+policy:
+  public_https_only: true
+  no_login_or_captcha_bypass: true
+  official_announcement_is_primary: true
+  media_is_supplement_only: true

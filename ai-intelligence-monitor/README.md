@@ -2,6 +2,8 @@
 
 An auditable harness for dependency-based personal investment research. Phase 0 provides versioned coverage, evidence contracts, a controlled state machine, replay, deterministic operations checks, and fixture-driven tests. Phase 1 adds manually supplied DRAM/HBM source text and bounded OpenAI or DeepSeek structured analysis. Phase 2 adds manual, allowlisted collection from three official T1 sources. Phase 3A adds disabled-by-default, gated SMTP email delivery for an existing passed alert brief. Phase 3B adds disabled-by-default, bounded multi-provider web discovery while preserving the existing evidence and signal gates. It still does not schedule jobs, connect Gmail, provide investment advice, or expose a frontend.
 
+The additive daily China AI channel is isolated from the frozen DRAM/HBM Signal pipeline. TianAPI is optional and disabled by default. Juhe ID 235 technology headlines and ID 850 AI briefs are separately keyed, bounded discovery providers; their titles and summaries are never evidence. A-share scope is anchored to official constituents of CSI `931071` and SSE STAR `950180`; final items require safely fetched official primary text and exact evidence quotes. Juhe stock data ID 21 is not integrated. See [`docs/DAILY_AI_A_SHARE.md`](docs/DAILY_AI_A_SHARE.md).
+
 ## Quick start
 
 ```bash

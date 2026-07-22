@@ -109,6 +109,13 @@ class Settings(BaseSettings):
     thenewsapi_key: SecretStr | None = Field(
         default=None, validation_alias="THENEWSAPI_KEY"
     )
+    tianapi_enabled: bool = Field(default=False, validation_alias="TIANAPI_ENABLED")
+    tianapi_api_key: SecretStr | None = Field(default=None, validation_alias="TIANAPI_API_KEY")
+    juhe_headlines_enabled: bool = Field(default=False, validation_alias="JUHE_HEADLINES_ENABLED")
+    juhe_headlines_api_key: SecretStr | None = Field(default=None, validation_alias="JUHE_HEADLINES_API_KEY")
+    juhe_ai_brief_enabled: bool = Field(default=False, validation_alias="JUHE_AI_BRIEF_ENABLED")
+    juhe_ai_brief_api_key: SecretStr | None = Field(default=None, validation_alias="JUHE_AI_BRIEF_API_KEY")
+    juhe_stock_enabled: bool = Field(default=False, validation_alias="JUHE_STOCK_ENABLED")
     web_search_timeout_seconds: float = Field(
         default=20.0, gt=0, le=120, validation_alias="WEB_SEARCH_TIMEOUT_SECONDS"
     )
@@ -156,7 +163,8 @@ class Settings(BaseSettings):
 
     @field_validator(
         "smtp_password", "brave_search_api_key", "tavily_api_key", "exa_api_key",
-        "you_api_key", "gemini_api_key", "thenewsapi_key", mode="before"
+        "you_api_key", "gemini_api_key", "thenewsapi_key", "tianapi_api_key",
+        "juhe_headlines_api_key", "juhe_ai_brief_api_key", mode="before"
     )
     @classmethod
     def normalize_empty_smtp_password(cls, value):

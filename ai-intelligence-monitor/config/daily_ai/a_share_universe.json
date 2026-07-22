@@ -1,0 +1,637 @@
+{
+  "version": "a-share-ai-universe-v1",
+  "status": "VERIFIED",
+  "generated_at": "2026-07-22T03:21:15.855228Z",
+  "sources": [
+    {
+      "index_code": "931071",
+      "url": "https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/file/autofile/cons/931071cons.xls",
+      "retrieved_at": "2026-07-22T03:21:15.851943Z",
+      "sha256": "a7b525054c3c4fd513c25efce1183c4a6a9e14d06b5e13edb7ccf2bb65c418a7"
+    },
+    {
+      "index_code": "950180",
+      "url": "https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/file/autofile/cons/950180cons.xls",
+      "retrieved_at": "2026-07-22T03:21:15.851943Z",
+      "sha256": "9b25796835e501e05040e5f3e3589eecb99adc6e8efdaf96f52bbb43d82a6330"
+    }
+  ],
+  "constituents": [
+    {
+      "security_code": "000681",
+      "company_name": "视觉中国",
+      "exchange": "SZSE",
+      "index_codes": [
+        "931071"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "000938",
+      "company_name": "紫光股份",
+      "exchange": "SZSE",
+      "index_codes": [
+        "931071"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "000977",
+      "company_name": "浪潮信息",
+      "exchange": "SZSE",
+      "index_codes": [
+        "931071"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "002065",
+      "company_name": "东华软件",
+      "exchange": "SZSE",
+      "index_codes": [
+        "931071"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "002152",
+      "company_name": "广电运通",
+      "exchange": "SZSE",
+      "index_codes": [
+        "931071"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "002230",
+      "company_name": "科大讯飞",
+      "exchange": "SZSE",
+      "index_codes": [
+        "931071"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "002236",
+      "company_name": "大华股份",
+      "exchange": "SZSE",
+      "index_codes": [
+        "931071"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "002281",
+      "company_name": "光迅科技",
+      "exchange": "SZSE",
+      "index_codes": [
+        "931071"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "002354",
+      "company_name": "天娱数科",
+      "exchange": "SZSE",
+      "index_codes": [
+        "931071"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "002373",
+      "company_name": "千方科技",
+      "exchange": "SZSE",
+      "index_codes": [
+        "931071"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "002415",
+      "company_name": "海康威视",
+      "exchange": "SZSE",
+      "index_codes": [
+        "931071"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "002555",
+      "company_name": "三七互娱",
+      "exchange": "SZSE",
+      "index_codes": [
+        "931071"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "300002",
+      "company_name": "神州泰岳",
+      "exchange": "SZSE",
+      "index_codes": [
+        "931071"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "300223",
+      "company_name": "北京君正",
+      "exchange": "SZSE",
+      "index_codes": [
+        "931071"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "300308",
+      "company_name": "中际旭创",
+      "exchange": "SZSE",
+      "index_codes": [
+        "931071"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "300383",
+      "company_name": "光环新网",
+      "exchange": "SZSE",
+      "index_codes": [
+        "931071"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "300442",
+      "company_name": "润泽科技",
+      "exchange": "SZSE",
+      "index_codes": [
+        "931071"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "300454",
+      "company_name": "深信服",
+      "exchange": "SZSE",
+      "index_codes": [
+        "931071"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "300458",
+      "company_name": "全志科技",
+      "exchange": "SZSE",
+      "index_codes": [
+        "931071"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "300502",
+      "company_name": "新易盛",
+      "exchange": "SZSE",
+      "index_codes": [
+        "931071"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "300613",
+      "company_name": "富瀚微",
+      "exchange": "SZSE",
+      "index_codes": [
+        "931071"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "300738",
+      "company_name": "奥飞数据",
+      "exchange": "SZSE",
+      "index_codes": [
+        "931071"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "300857",
+      "company_name": "协创数据",
+      "exchange": "SZSE",
+      "index_codes": [
+        "931071"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "301316",
+      "company_name": "慧博云通",
+      "exchange": "SZSE",
+      "index_codes": [
+        "931071"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "301536",
+      "company_name": "星宸科技",
+      "exchange": "SZSE",
+      "index_codes": [
+        "931071"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "302132",
+      "company_name": "中航成飞",
+      "exchange": "SZSE",
+      "index_codes": [
+        "931071"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "600699",
+      "company_name": "均胜电子",
+      "exchange": "SSE",
+      "index_codes": [
+        "931071"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "600728",
+      "company_name": "佳都科技",
+      "exchange": "SSE",
+      "index_codes": [
+        "931071"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "601360",
+      "company_name": "三六零",
+      "exchange": "SSE",
+      "index_codes": [
+        "931071"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "603019",
+      "company_name": "中科曙光",
+      "exchange": "SSE",
+      "index_codes": [
+        "931071"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "603083",
+      "company_name": "剑桥科技",
+      "exchange": "SSE",
+      "index_codes": [
+        "931071"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "603296",
+      "company_name": "华勤技术",
+      "exchange": "SSE",
+      "index_codes": [
+        "931071"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "603444",
+      "company_name": "吉比特",
+      "exchange": "SSE",
+      "index_codes": [
+        "931071"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "603881",
+      "company_name": "数据港",
+      "exchange": "SSE",
+      "index_codes": [
+        "931071"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "603893",
+      "company_name": "瑞芯微",
+      "exchange": "SSE",
+      "index_codes": [
+        "931071"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "688003",
+      "company_name": "天准科技",
+      "exchange": "SSE",
+      "index_codes": [
+        "931071",
+        "950180"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "688008",
+      "company_name": "澜起科技",
+      "exchange": "SSE",
+      "index_codes": [
+        "931071",
+        "950180"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "688018",
+      "company_name": "乐鑫科技",
+      "exchange": "SSE",
+      "index_codes": [
+        "931071",
+        "950180"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "688031",
+      "company_name": "星环科技",
+      "exchange": "SSE",
+      "index_codes": [
+        "950180"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "688041",
+      "company_name": "海光信息",
+      "exchange": "SSE",
+      "index_codes": [
+        "931071",
+        "950180"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "688047",
+      "company_name": "龙芯中科",
+      "exchange": "SSE",
+      "index_codes": [
+        "931071",
+        "950180"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "688088",
+      "company_name": "虹软科技",
+      "exchange": "SSE",
+      "index_codes": [
+        "950180"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "688099",
+      "company_name": "晶晨股份",
+      "exchange": "SSE",
+      "index_codes": [
+        "950180"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "688107",
+      "company_name": "安路科技",
+      "exchange": "SSE",
+      "index_codes": [
+        "950180"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "688111",
+      "company_name": "金山办公",
+      "exchange": "SSE",
+      "index_codes": [
+        "931071",
+        "950180"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "688123",
+      "company_name": "聚辰股份",
+      "exchange": "SSE",
+      "index_codes": [
+        "950180"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "688158",
+      "company_name": "优刻得",
+      "exchange": "SSE",
+      "index_codes": [
+        "931071",
+        "950180"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "688169",
+      "company_name": "石头科技",
+      "exchange": "SSE",
+      "index_codes": [
+        "931071",
+        "950180"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "688228",
+      "company_name": "开普云",
+      "exchange": "SSE",
+      "index_codes": [
+        "950180"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "688232",
+      "company_name": "新点软件",
+      "exchange": "SSE",
+      "index_codes": [
+        "950180"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "688256",
+      "company_name": "寒武纪",
+      "exchange": "SSE",
+      "index_codes": [
+        "931071",
+        "950180"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "688322",
+      "company_name": "奥比中光",
+      "exchange": "SSE",
+      "index_codes": [
+        "950180"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "688327",
+      "company_name": "云从科技",
+      "exchange": "SSE",
+      "index_codes": [
+        "931071",
+        "950180"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "688343",
+      "company_name": "云天励飞",
+      "exchange": "SSE",
+      "index_codes": [
+        "950180"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "688365",
+      "company_name": "光云科技",
+      "exchange": "SSE",
+      "index_codes": [
+        "931071"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "688385",
+      "company_name": "复旦微电",
+      "exchange": "SSE",
+      "index_codes": [
+        "950180"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "688400",
+      "company_name": "凌云光",
+      "exchange": "SSE",
+      "index_codes": [
+        "931071",
+        "950180"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "688475",
+      "company_name": "萤石网络",
+      "exchange": "SSE",
+      "index_codes": [
+        "931071",
+        "950180"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "688521",
+      "company_name": "芯原股份",
+      "exchange": "SSE",
+      "index_codes": [
+        "950180"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "688561",
+      "company_name": "奇安信",
+      "exchange": "SSE",
+      "index_codes": [
+        "931071",
+        "950180"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "688568",
+      "company_name": "中科星图",
+      "exchange": "SSE",
+      "index_codes": [
+        "950180"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "688608",
+      "company_name": "恒玄科技",
+      "exchange": "SSE",
+      "index_codes": [
+        "950180"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "688615",
+      "company_name": "合合信息",
+      "exchange": "SSE",
+      "index_codes": [
+        "950180"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "688686",
+      "company_name": "奥普特",
+      "exchange": "SSE",
+      "index_codes": [
+        "950180"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "688775",
+      "company_name": "影石创新",
+      "exchange": "SSE",
+      "index_codes": [
+        "950180"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "688787",
+      "company_name": "海天瑞声",
+      "exchange": "SSE",
+      "index_codes": [
+        "931071"
+      ],
+      "effective_date": "20260721"
+    },
+    {
+      "security_code": "688802",
+      "company_name": "沐曦股份",
+      "exchange": "SSE",
+      "index_codes": [
+        "950180"
+      ],
+      "effective_date": "20260721"
+    }
+  ]
+}
