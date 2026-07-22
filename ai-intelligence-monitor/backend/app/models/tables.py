@@ -230,3 +230,31 @@ class SourceFetchAudit(Base):
     artifact_path: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class WebDiscoveryAudit(Base):
+    __tablename__ = "web_discovery_audits"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    discovery_run_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    replay_of: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    status: Mapped[str] = mapped_column(String(40))
+    provider: Mapped[str] = mapped_column(String(40))
+    adapter_version: Mapped[str] = mapped_column(String(80))
+    query_plan_version: Mapped[str] = mapped_column(String(40))
+    source_policy_version: Mapped[str] = mapped_column(String(40))
+    coverage_id: Mapped[str] = mapped_column(String(80))
+    coverage_version: Mapped[str] = mapped_column(String(40))
+    thesis_version: Mapped[str] = mapped_column(String(40))
+    query_plan: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    metrics: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    search_results: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    triage_results: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    source_chains: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    document_ids: Mapped[list[int]] = mapped_column(JSON, default=list)
+    analysis_run_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    failures: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    ops_check: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    artifact_paths: Mapped[list[str]] = mapped_column(JSON, default=list)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

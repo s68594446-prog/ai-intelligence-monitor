@@ -1,0 +1,32 @@
+policy_version: web-source-policy-v1
+coverage_id: dram_hbm
+t1_domains:
+  - micron.com
+  - investors.micron.com
+  - samsung.com
+  - news.samsung.com
+  - skhynix.com
+  - nvidia.com
+  - investor.nvidia.com
+  - tsmc.com
+  - sec.gov
+  - bis.gov
+  - commerce.gov
+  - gov.cn
+t2_domains:
+  - reuters.com
+  - trendforce.com
+  - jedec.org
+  - semi.org
+  - semiengineering.com
+t3_domains:
+  - reddit.com
+  - x.com
+  - twitter.com
+  - weibo.com
+  - zhihu.com
+rules:
+  unknown_domain: UNVERIFIED
+  t3_discovery_only: true
+  new_t1_requires_manual_approval: true
+  single_t3_cannot_send_alert: true

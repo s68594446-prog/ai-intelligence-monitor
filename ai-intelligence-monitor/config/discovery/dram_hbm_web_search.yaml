@@ -1,0 +1,26 @@
+plan_version: discovery-query-plan-v1
+coverage_id: dram_hbm
+default_time_range: 30d
+queries:
+  - {id: hbm_orders_en, variable: HBM order visibility, purpose: orders and customer commitments, language: en, time_range: 30d, query: 'HBM order customer production agreement Micron Samsung SK hynix'}
+  - {id: hbm_qualification_en, variable: customer qualification, purpose: distinguish samples from qualification and production, language: en, time_range: 30d, query: 'HBM3E HBM4 customer qualification sample mass production shipment'}
+  - {id: hbm4_cn, variable: customer qualification, purpose: Chinese-language HBM4 production disclosures, language: zh, time_range: 30d, query: 'HBM4 客户认证 样品 量产 出货 美光 三星 SK海力士'}
+  - {id: dram_pricing_en, variable: DRAM pricing, purpose: contract and spot price evidence, language: en, time_range: 14d, query: 'DRAM DDR5 LPDDR GDDR contract price spot price official'}
+  - {id: dram_pricing_cn, variable: DRAM pricing, purpose: Chinese-language contract and spot price evidence, language: zh, time_range: 14d, query: 'DRAM DDR5 LPDDR GDDR 合约价 现货价'}
+  - {id: memory_inventory_en, variable: inventory, purpose: manufacturer and channel inventory changes, language: en, time_range: 30d, query: 'DRAM HBM inventory days channel inventory manufacturer disclosure'}
+  - {id: hbm_yield_en, variable: yield, purpose: verified yield and qualification changes, language: en, time_range: 30d, query: 'HBM3E HBM4 yield qualification production Samsung Micron SK hynix'}
+  - {id: capacity_migration_en, variable: capacity, purpose: advanced-node capacity migration and wafer allocation, language: en, time_range: 30d, query: 'DRAM capacity migration HBM wafer allocation bit supply production'}
+  - {id: micron_en, variable: manufacturer capital expenditure, purpose: Micron guidance and capital discipline, language: en, time_range: 30d, query: 'site:micron.com HBM DRAM capex capacity production guidance'}
+  - {id: samsung_en, variable: manufacturer capital expenditure, purpose: Samsung memory guidance and capital discipline, language: en, time_range: 30d, query: 'site:samsung.com HBM DRAM capex capacity production guidance'}
+  - {id: skhynix_en, variable: manufacturer capital expenditure, purpose: SK hynix memory guidance and capital discipline, language: en, time_range: 30d, query: 'site:skhynix.com HBM DRAM capex capacity production guidance'}
+  - {id: cxmt_cn, variable: capacity, purpose: CXMT effective capacity reverse trigger, language: zh, time_range: 90d, query: '长鑫存储 CXMT DRAM 产能 扩产 投产 监管'}
+  - {id: nvidia_rubin_en, variable: NVIDIA GPU demand, purpose: Blackwell and Rubin deployment sentinel, language: en, time_range: 30d, query: 'site:nvidia.com Blackwell Rubin deployment production systems demand'}
+  - {id: cloud_capex_en, variable: cloud provider CapEx, purpose: cloud CapEx reverse trigger, language: en, time_range: 30d, query: 'cloud provider capital expenditure AI infrastructure official earnings capex'}
+  - {id: cloud_capex_cn, variable: cloud provider CapEx, purpose: Chinese-language cloud CapEx disclosures, language: zh, time_range: 30d, query: '云厂商 资本开支 AI基础设施 财报 官方'}
+  - {id: ai_servers_en, variable: AI server shipments, purpose: AI server and accelerator demand sentinel, language: en, time_range: 30d, query: 'AI server shipments AI factory accelerator deployment official'}
+  - {id: cowos_en, variable: CoWoS capacity, purpose: advanced packaging dependency sentinel, language: en, time_range: 30d, query: 'TSMC CoWoS capacity expansion production official'}
+  - {id: export_controls_en, variable: semiconductor export policy, purpose: export-control and regulatory changes, language: en, time_range: 30d, query: 'semiconductor export controls AI accelerators memory official regulation'}
+  - {id: export_controls_cn, variable: semiconductor export policy, purpose: Chinese-language regulatory changes, language: zh, time_range: 30d, query: '半导体 出口管制 AI加速器 存储器 监管 原文'}
+  - {id: bit_supply_reverse_en, variable: conventional DRAM bit supply vs demand, purpose: thesis reverse trigger for excess bit supply, language: en, time_range: 90d, query: 'DRAM bit supply growth bit demand growth company guidance'}
+  - {id: hbm_inventory_reverse_en, variable: HBM inventory days, purpose: thesis reverse trigger for accumulating HBM inventory, language: en, time_range: 90d, query: 'HBM inventory days accumulation company disclosure'}
+  - {id: samsung_qualification_reverse_en, variable: Samsung HBM customer qualifications, purpose: thesis reverse trigger for named production qualifications, language: en, time_range: 90d, query: 'Samsung HBM production qualification named customer official'}

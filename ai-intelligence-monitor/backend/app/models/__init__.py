@@ -10,6 +10,7 @@ from app.models.tables import (
     SourceFetchAudit,
     StateTransitionAudit,
     Thesis,
+    WebDiscoveryAudit,
 )
 
 __all__ = [
@@ -24,4 +25,5 @@ __all__ = [
     "SourceFetchAudit",
     "StateTransitionAudit",
     "Thesis",
+    "WebDiscoveryAudit",
 ]
