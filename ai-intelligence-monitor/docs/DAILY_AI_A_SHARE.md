@@ -1,6 +1,6 @@
 # Daily China / A-share AI channel
 
-Status: **PARTIAL / offline verified / live fail-closed**
+Status: **SUSPENDED — environment-blocked (offline verified; Juhe discovery live verified; primary-evidence fetch blocked by local fake-IP DNS)**
 
 This additive channel is separate from the frozen DRAM/HBM research Harness. It cannot modify S0-S3, Adjudication, SEND_ALERT, or existing Signals, and it never sends email during validation.
 
@@ -38,4 +38,12 @@ At most four A-share items may appear and they share the China limit of six and 
 
 ## Latest live audit
 
-The latest A-share run queried four official discovery domains over a deterministic 48-hour window. One official candidate passed discovery, but safe fetch stopped at `NON_PUBLIC_ADDRESS` because the local DNS environment returned a reserved address. No raw text, DeepSeek analysis, or digest event was manufactured. A-share Ops passed the fail-closed result. TianAPI is now disabled. Juhe offline verification passes, but the two Juhe enabled flags and product keys are not currently present in the local Settings environment, so no live Juhe request has been made and the channel remains `PARTIAL`.
+The latest A-share run queried four official discovery domains over a deterministic 48-hour window. One official candidate passed discovery, but safe fetch stopped at `NON_PUBLIC_ADDRESS` because the local DNS environment returned a reserved address. No raw text, DeepSeek analysis, or digest event was manufactured. A-share Ops passed the fail-closed result. TianAPI is now disabled.
+
+On 2026-07-22 the Juhe live smoke passed: ID 235 headlines and ID 850 AI brief each made exactly one real request and returned HTTP 200 with `error_code=0` and three results; no key appeared in any artifact or output. Both Juhe domains resolve to reserved 198.18.x.x addresses under the local fake-IP DNS layer; the discovery requests succeed only because the local tunnel intercepts and forwards them. The discovery adapters do not use the SSRF gate; the evidence fetch path does, and correctly fails closed.
+
+## Suspension record (2026-07-22)
+
+The A-share channel is suspended as **environment-blocked**, not abandoned and not deleted. The code is complete and frozen at checkpoint `9898078` (`checkpoint: A-share AI channel (offline-verified, live pending)`). Offline verification passes and Juhe discovery is live-verified. Live acceptance cannot proceed because the local fake-IP DNS layer resolves every official T1 domain (SSE, SZSE, BSE, CNINFO) to reserved 198.18.x.x addresses, so the unchanged SSRF gate rejects every primary-evidence fetch with `NON_PUBLIC_ADDRESS`. This is an operator-environment blocker; the gate must not be relaxed to work around it. The channel resumes when the local DNS environment returns real public addresses for the official domains.
+
+Phase 3C (global AI news channel) starts early because of this external network blocker, not because of any defect in the A-share code. Global T1/T2 sources resolve to real public addresses through the operator's VPN, so the SSRF gate passes them and the full discovery → safe fetch → DeepSeek analysis → digest loop is achievable on this machine.
