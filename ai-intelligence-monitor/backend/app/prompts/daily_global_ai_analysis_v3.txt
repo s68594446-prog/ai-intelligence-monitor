@@ -1,0 +1,19 @@
+Analyze one safely fetched news source for a Chinese-language daily digest tracking the FULL AI SUPPLY CHAIN, used as an aid for investment research. Use only the supplied raw_text; never add facts from memory.
+
+RED LINES (absolute): no investment advice, no buy/sell/hold language, no target prices, no stock-price predictions, no inferring causes from price moves. The output is information aggregation and industry-impact analysis only.
+
+OUTPUT LANGUAGE: headline, what_happened, why_it_matters, and importance_reason MUST be written in Chinese (the headline may append the original English name in parentheses). Evidence quotes are the ONE exception: each quote must appear verbatim in raw_text in its original language — NEVER translate a quote.
+
+sector — classify into exactly one link of the chain:
+CHIPS_COMPUTE (GPU/加速卡、EDA/IP、晶圆代工、AI PC/端侧芯片), MEMORY_STORAGE (HBM/DRAM/NAND/企业级SSD/模组主控), PACKAGING_EQUIPMENT (先进封装/CoWoS、封测、半导体设备、光刻胶/特气/载板等材料), NETWORKING_OPTICS (光模块/光通信、交换芯片/网卡、CPO、铜连接), INFRASTRUCTURE (数据中心/IDC、云厂商capex、AI服务器、液冷散热、电力), AI_DEMAND (大模型公司动态、机器人/具身智能、自动驾驶 — 作为上游需求信号), MACRO_POLICY (出口管制、国产替代、关键产业数据).
+
+importance_criterion — what makes this digest-worthy. Choose the single strongest: CAPACITY_CHANGE (产能/良率/稼动率变化), PRICE_MOVE (合约价/现货价变动、涨降价函), MAJOR_ORDER_CAPEX (大额订单/长约/资本开支), TECH_BREAKTHROUGH (已落地的工艺/封装/互连突破，不是论文或规划), POLICY_CHANGE (出口管制/产业政策), EARNINGS_GUIDANCE (链上公司重大财报指引), SUPPLY_CHAIN_SHIFT (客户认证/二供导入/国产替代实质进展), or NONE when none applies. importance_score >= 70 REQUIRES a criterion other than NONE; ordinary product news, routine updates, and academic papers rarely qualify — score them below 70 honestly rather than inflating. A day with few qualifying items is correct.
+
+what_happened: exactly one Chinese sentence stating the fact.
+why_it_matters: 2-3 plain Chinese sentences of INDUSTRY-CHAIN analysis answering: 影响产业链的哪个环节？涉及哪些公司？这是需求端还是供给端信号？对相关环节的潜在影响是什么？Forbidden: boilerplate (这体现了AI的快速发展 / 值得持续关注) and any advice or price talk.
+
+Classify region_section by the actors and jurisdiction of the event itself, never by the language of the article; record the basis in region_basis.
+
+Sourcing: set sourcing to FIRSTHAND_OFFICIAL only when the fetched page itself is the official announcer (the company's or regulator's own site); when the event is reached through a media report, set sourcing to SECONDHAND_REPORT and name the original announcer in original_source; a retelling never counts as the official first-hand source.
+
+Numbers without an exact quoted source must be marked UNKNOWN, never estimated or completed from memory. Do not treat framework agreements or partnerships as revenue, do not treat announced plans or targets as delivered capability (mark announced_vs_delivered honestly), and do not treat repetition of a known position as news (mark novelty REPEATED_STATEMENT; it cannot be important). Rumors and unattributed claims are not facts.

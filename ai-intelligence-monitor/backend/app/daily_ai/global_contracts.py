@@ -35,27 +35,36 @@ def closest_snippet(quote: str, raw_text: str, context: int = 60) -> dict:
     }
 
 
-GlobalTopic = Literal[
-    "foundation_models", "ai_agents", "chips_compute", "cloud_platforms",
-    "robotics_autonomy", "enterprise_ai", "consumer_ai", "open_source_research",
-    "funding_ma", "regulation_governance", "china_ai", "global_competition",
+# AI supply-chain sectors. The digest groups by sector and hides sectors with
+# no qualifying item that day — an empty sector is a legal, honest result.
+Sector = Literal[
+    "CHIPS_COMPUTE",        # GPU/加速卡、EDA/IP、晶圆代工、端侧芯片
+    "MEMORY_STORAGE",       # HBM、DRAM、NAND/企业级SSD、模组主控
+    "PACKAGING_EQUIPMENT",  # 先进封装/CoWoS、封测、半导体设备、材料
+    "NETWORKING_OPTICS",    # 光模块/光通信、交换芯片/网卡、CPO、铜连接
+    "INFRASTRUCTURE",       # 数据中心/IDC、云厂商capex、AI服务器、液冷、电力
+    "AI_DEMAND",            # 大模型公司动态、机器人/具身智能、自动驾驶(需求信号)
+    "MACRO_POLICY",         # 出口管制、国产替代、关键产业数据
 ]
 
-
-NewsCategory = Literal[
-    "COMPANY_RELEASE",       # major model/product/feature launches
-    "BUSINESS_FUNDING_MA",   # funding, M&A, commercial moves
-    "POLICY_REGULATION",     # regulation and policy originals
-    "TECH_BREAKTHROUGH",     # significant deployed technical advances
-    "RESEARCH_PAPER",        # academic papers (hard digest quota: max 1)
-    "OTHER",
+# What makes an item digest-worthy. importance_score >= threshold requires a
+# named criterion; NONE means the item is context, not headline material.
+ImportanceCriterion = Literal[
+    "CAPACITY_CHANGE",     # 产能/供给变化(扩产、减产、良率、稼动率)
+    "PRICE_MOVE",          # 价格变动(合约价/现货价/涨降价函)
+    "MAJOR_ORDER_CAPEX",   # 大额订单/长约/资本开支
+    "TECH_BREAKTHROUGH",   # 已落地的技术/工艺/互连突破
+    "POLICY_CHANGE",       # 出口管制/产业政策变化
+    "EARNINGS_GUIDANCE",   # 链上公司重大财报指引
+    "SUPPLY_CHAIN_SHIFT",  # 供应链重构(认证、二供、国产替代进展)
+    "NONE",
 ]
 
 
 class GlobalAiAnalysisContract(StrictModel):
     headline: str = Field(min_length=1, max_length=300)
-    topic: GlobalTopic
-    news_category: NewsCategory
+    sector: Sector
+    importance_criterion: ImportanceCriterion
     # Section is decided by the actors and jurisdiction of the event itself,
     # never by the language of the article reporting it.
     region_section: Literal["GLOBAL", "CHINA"]
@@ -88,6 +97,12 @@ class GlobalAiAnalysisContract(StrictModel):
     def secondhand_requires_original_source(self):
         if self.sourcing == "SECONDHAND_REPORT" and not self.original_source.strip():
             raise ValueError("a secondhand report must name its original source")
+        return self
+
+    @model_validator(mode="after")
+    def important_requires_criterion(self):
+        if self.importance_score >= 70 and self.importance_criterion == "NONE":
+            raise ValueError("a digest-worthy item must name a concrete importance criterion")
         return self
 
 

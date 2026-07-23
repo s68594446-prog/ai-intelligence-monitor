@@ -1,0 +1,170 @@
+version: industry-keywords-v1
+# Bilingual full-supply-chain relevance terms for the keyword prefilter on
+# general (non-dedicated) feeds. Matching is case-insensitive substring, so
+# terms are chosen to be distinctive (no bare "ai"/"chip" that would match
+# unrelated words).
+zh:
+  # 芯片与算力
+  - 芯片
+  - 半导体
+  - 晶圆
+  - 代工
+  - 台积电
+  - 中芯国际
+  - 英伟达
+  - 寒武纪
+  - 昇腾
+  - 加速卡
+  - 光刻
+  - 制程
+  - 算力
+  - 端侧
+  # 存储
+  - 存储
+  - 内存
+  - 闪存
+  - 固态硬盘
+  - 海力士
+  - 美光
+  - 长鑫
+  - 江波龙
+  - 兆易创新
+  # 封装设备材料
+  - 封装
+  - 封测
+  - 日月光
+  - 长电科技
+  - 通富微电
+  - 光刻胶
+  - 特气
+  - 载板
+  - 北方华创
+  - 中微公司
+  - 刻蚀
+  - 薄膜沉积
+  # 网络与光
+  - 光模块
+  - 光通信
+  - 光器件
+  - 中际旭创
+  - 新易盛
+  - 天孚通信
+  - 交换机
+  - 网卡
+  - 铜缆
+  - 铜连接
+  # 基础设施
+  - 数据中心
+  - 智算中心
+  - 云厂商
+  - 资本开支
+  - 资本支出
+  - 服务器
+  - 工业富联
+  - 浪潮信息
+  - 液冷
+  - 散热
+  - 电源
+  - 供电
+  # 需求端
+  - 大模型
+  - 人工智能
+  - 生成式
+  - 机器人
+  - 具身智能
+  - 自动驾驶
+  - 智能驾驶
+  # 宏观政策
+  - 出口管制
+  - 国产替代
+  - 产能
+  - 扩产
+  - 涨价
+  - 降价
+  - 合约价
+  - 现货价
+  - 订单
+  - 财报
+  - 指引
+  - 营收
+en:
+  - semiconductor
+  - foundry
+  - wafer
+  - tsmc
+  - nvidia
+  - cambricon
+  - ascend
+  - gpu
+  - accelerator
+  - lithography
+  - process node
+  - edge ai
+  - ai pc
+  # memory
+  - hbm
+  - dram
+  - nand
+  - ssd
+  - sk hynix
+  - hynix
+  - micron
+  - cxmt
+  - memory chip
+  - memory price
+  # packaging / equipment / materials
+  - cowos
+  - advanced packaging
+  - osat
+  - chiplet
+  - asml
+  - applied materials
+  - lam research
+  - etch
+  - deposition
+  - euv
+  - photoresist
+  - abf substrate
+  # networking / optics
+  - optical module
+  - optical transceiver
+  - transceiver
+  - photonics
+  - broadcom
+  - marvell
+  - co-packaged
+  - infiniband
+  - ethernet switch
+  - interconnect
+  # infrastructure
+  - data center
+  - datacenter
+  - capex
+  - capital expenditure
+  - ai server
+  - supermicro
+  - foxconn
+  - liquid cooling
+  - power grid
+  - substation
+  # demand side
+  - large language model
+  - foundation model
+  - openai
+  - anthropic
+  - gemini
+  - robotics
+  - humanoid
+  - autonomous driving
+  # macro / policy
+  - export control
+  - export restriction
+  - sanction
+  - localization
+  - capacity expansion
+  - price hike
+  - contract price
+  - spot price
+  - guidance
+  - earnings
+  - orders

@@ -1,4 +1,4 @@
-policy_version: daily-ai-source-policy-v2
+policy_version: daily-ai-source-policy-v3
 coverage_id: cn_daily_ai
 # Unified global + China spectrum for the daily AI digest.
 # T1: official first-party only — AI lab/company official sites, regulator
@@ -15,6 +15,13 @@ t1_domains:
   - microsoft.com
   - nvidia.com
   - amd.com
+  - skhynix.com
+  - micron.com
+  - asml.com
+  - broadcom.com
+  - marvell.com
+  - intel.com
+  - tsmc.com
   - aboutamazon.com
   - aws.amazon.com
   - apple.com
@@ -57,6 +64,14 @@ t2_domains:
   - semianalysis.com
   - venturebeat.com
   - technologyreview.com
+  - digitimes.com
+  - trendforce.com
+  - eetimes.com
+  - tomshardware.com
+  - theregister.com
+  - mydrivers.com
+  - wallstreetcn.com
+  - dramexchange.com
   - jiqizhixin.com
   - qbitai.com
   - 36kr.com

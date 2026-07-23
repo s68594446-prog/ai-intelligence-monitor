@@ -1,42 +1,48 @@
-version: daily-ai-rss-sources-v2
-# Every feed below returned 200 with a valid RSS/Atom body when probed on
-# 2026-07-23 (global feeds TLS-verified from the local machine; qbitai/36kr
-# additionally verified from the GitHub Actions env-probe; leiphone verified
-# locally only). Feeds without a valid endpoint were excluded, not guessed:
-#   - anthropic.com: no public RSS endpoint (404 on /rss.xml and /news/rss.xml)
-#   - ai.meta.com, about.fb.com: no valid feed (404)
-#   - blogs.microsoft.com/ai: 410 Gone; replaced by news.microsoft.com Source AI topic
-#   - jiqizhixin.com/rss: not a valid feed (Actions probe)
-# Their announcements still reach the digest through T2 media / Hacker News as
-# SECONDHAND_REPORT with original_source named — never impersonating T1.
-#
-# prefilter: false = the feed is AI-dedicated, items pass without keyword match.
-# prefilter: true  = general feed, items must match the bilingual AI keyword list.
-# A single failing feed is recorded per-feed and never aborts the run.
+version: daily-ai-rss-sources-v3
+# Supply-chain edition. Every feed marked verified returned 200 with a valid
+# RSS/Atom body on the 2026-07-23 probe. Probed and EXCLUDED (no valid public
+# feed): TSMC PR (403 bot-guard), AMD newsroom rss (404), ASML news rss (404),
+# Broadcom newsroom (404), TrendForce root feed (404; /news/feed works),
+# AnandTech (site retired), Reuters public RSS (dead), 集微网/芯智讯/
+# 半导体行业观察/EET-China (no valid endpoint), Anthropic/Meta AI (no feed),
+# arXiv (dropped by design: papers have little chain-tracking value).
+# prefilter:false = sector-dedicated feed; true = general feed, items must hit
+# the bilingual industry keyword list. Single-feed failures are recorded
+# per-feed and never abort the run.
 feeds:
-  # --- global, official first-party (T1 by source policy) ---
-  - {name: openai, url: 'https://openai.com/news/rss.xml', max_items: 10, prefilter: false}
-  - {name: google_ai, url: 'https://blog.google/technology/ai/rss/', max_items: 10, prefilter: false}
-  - {name: deepmind, url: 'https://deepmind.google/blog/rss.xml', max_items: 10, prefilter: false}
-  - {name: nvidia, url: 'https://blogs.nvidia.com/feed/', max_items: 10, prefilter: false}
-  - {name: microsoft_ai, url: 'https://news.microsoft.com/source/topics/ai/feed/', max_items: 10, prefilter: false}
-  - {name: arxiv_cs_ai, url: 'https://rss.arxiv.org/rss/cs.AI', max_items: 3, prefilter: false}
-  - {name: arxiv_cs_lg, url: 'https://rss.arxiv.org/rss/cs.LG', max_items: 3, prefilter: false}
-  # --- global, professional media (T2) / aggregator (T3 discovery-only) ---
-  - {name: techcrunch_ai, url: 'https://techcrunch.com/category/artificial-intelligence/feed/', max_items: 10, prefilter: false}
-  - {name: verge_ai, url: 'https://www.theverge.com/rss/ai-artificial-intelligence/index.xml', max_items: 10, prefilter: false}
-  - {name: venturebeat_ai, url: 'https://venturebeat.com/category/ai/feed/', max_items: 10, prefilter: false}
-  - {name: arstechnica_ai, url: 'https://arstechnica.com/ai/feed/', max_items: 10, prefilter: false}
-  - {name: mit_tech_review, url: 'https://www.technologyreview.com/feed/', max_items: 10, prefilter: true}
-  - {name: wired_ai, url: 'https://www.wired.com/feed/tag/ai/latest/rss', max_items: 10, prefilter: false}
-  - {name: hackernews, url: 'https://news.ycombinator.com/rss', max_items: 15, prefilter: true}
-  # --- China (T2 media; item links may reach T1 official pages) ---
-  # Chinese AI company official sites (zhipuai.cn/bigmodel.cn, moonshot.cn,
-  # minimaxi.com, deepseek.com, research.baidu.com) were probed on 2026-07-23:
-  # none serves a valid RSS/Atom endpoint (HTML or 404). Their announcements
-  # arrive via these T2 feeds as SECONDHAND_REPORT with original_source named,
-  # or become FIRSTHAND when an item links directly to their T1 domain.
-  - {name: qbitai, url: 'https://www.qbitai.com/feed', max_items: 10, prefilter: false}
+  # --- company official / IR (T1) ---
+  - {name: skhynix_news, url: 'https://news.skhynix.com/feed/', max_items: 10, prefilter: false}
+  - {name: micron_ir, url: 'https://investors.micron.com/rss/news-releases.xml', max_items: 10, prefilter: false}
+  - {name: nvidia_newsroom, url: 'https://nvidianews.nvidia.com/rss.xml', max_items: 10, prefilter: false}
+  - {name: nvidia_blog, url: 'https://blogs.nvidia.com/feed/', max_items: 5, prefilter: false}
+  # local probe hit TLS handshake timeouts on these two IR endpoints; pending
+  # verification from the Actions runner, fail-soft either way:
+  - {name: amd_ir, url: 'https://ir.amd.com/rss/news-releases.xml', max_items: 5, prefilter: false}
+  - {name: broadcom_ir, url: 'https://investors.broadcom.com/rss/news-releases.xml', max_items: 5, prefilter: false}
+  # --- international industry media (T2) ---
+  - {name: digitimes, url: 'https://www.digitimes.com/rss/daily.xml', max_items: 15, prefilter: true}
+  - {name: trendforce_news, url: 'https://www.trendforce.com/news/feed', max_items: 10, prefilter: true}
+  - {name: semianalysis, url: 'https://www.semianalysis.com/feed', max_items: 5, prefilter: false}
+  - {name: eetimes, url: 'https://www.eetimes.com/feed/', max_items: 10, prefilter: true}
+  - {name: tomshardware, url: 'https://www.tomshardware.com/feeds/all', max_items: 15, prefilter: true}
+  - {name: theregister, url: 'https://www.theregister.com/headlines.atom', max_items: 15, prefilter: true}
+  # --- Chinese industry media (T2) ---
+  - {name: mydrivers, url: 'http://rss.mydrivers.com/rss.aspx', max_items: 15, prefilter: true}
+  - {name: wallstreetcn, url: 'https://dedicated.wallstreetcn.com/rss.xml', max_items: 15, prefilter: true}
+  - {name: dramexchange, url: 'https://www.dramexchange.com/rss.xml', max_items: 5, prefilter: false}
+  - {name: qbitai, url: 'https://www.qbitai.com/feed', max_items: 8, prefilter: true}
   - {name: kr36, url: 'https://36kr.com/feed', max_items: 10, prefilter: true}
-  - {name: leiphone, url: 'https://www.leiphone.com/feed', max_items: 10, prefilter: true}
-  - {name: infoq_cn, url: 'https://www.infoq.cn/feed', max_items: 10, prefilter: true}
+  - {name: leiphone, url: 'https://www.leiphone.com/feed', max_items: 8, prefilter: true}
+  - {name: infoq_cn, url: 'https://www.infoq.cn/feed', max_items: 5, prefilter: true}
+  # --- demand-side signals, retained at reduced quota (T1/T2/T3) ---
+  - {name: openai, url: 'https://openai.com/news/rss.xml', max_items: 5, prefilter: false}
+  - {name: google_ai, url: 'https://blog.google/technology/ai/rss/', max_items: 5, prefilter: false}
+  - {name: deepmind, url: 'https://deepmind.google/blog/rss.xml', max_items: 3, prefilter: false}
+  - {name: microsoft_ai, url: 'https://news.microsoft.com/source/topics/ai/feed/', max_items: 5, prefilter: false}
+  - {name: techcrunch_ai, url: 'https://techcrunch.com/category/artificial-intelligence/feed/', max_items: 5, prefilter: true}
+  - {name: verge_ai, url: 'https://www.theverge.com/rss/ai-artificial-intelligence/index.xml', max_items: 5, prefilter: true}
+  - {name: venturebeat_ai, url: 'https://venturebeat.com/category/ai/feed/', max_items: 5, prefilter: true}
+  - {name: arstechnica_ai, url: 'https://arstechnica.com/ai/feed/', max_items: 5, prefilter: true}
+  - {name: mit_tech_review, url: 'https://www.technologyreview.com/feed/', max_items: 5, prefilter: true}
+  - {name: wired_ai, url: 'https://www.wired.com/feed/tag/ai/latest/rss', max_items: 5, prefilter: true}
+  - {name: hackernews, url: 'https://news.ycombinator.com/rss', max_items: 10, prefilter: true}

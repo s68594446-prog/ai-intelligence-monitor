@@ -42,7 +42,13 @@ CONFIG_DIR = Path(__file__).resolve().parents[3] / "config/daily_ai"
 QUERY_PLAN_PATH = CONFIG_DIR / "cn_ai_queries.yaml"
 SOURCE_POLICY_PATH = CONFIG_DIR / "daily_ai_source_policy.yaml"
 RSS_SOURCES_PATH = CONFIG_DIR / "rss_sources.yaml"
-PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts/daily_global_ai_analysis_v2.txt"
+KEYWORDS_PATH = CONFIG_DIR / "industry_keywords.yaml"
+PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts/daily_global_ai_analysis_v3.txt"
+
+
+def load_industry_keywords() -> list[str]:
+    data = yaml.safe_load(KEYWORDS_PATH.read_text(encoding="utf-8"))
+    return list(data["zh"]) + list(data["en"])
 
 # Board-balancing is a fetch-budget concern only; the final GLOBAL/CHINA
 # section of each item is still decided by the analysis contract from the
@@ -59,16 +65,6 @@ CN_BOARD_DOMAINS = {
 def _is_cn_domain(domain: str) -> bool:
     host = domain.casefold()
     return host.endswith(".cn") or any(host == d or host.endswith("." + d) for d in CN_BOARD_DOMAINS)
-
-# Bilingual AI relevance terms for general (non-AI-dedicated) discovery
-# sources; AI-dedicated feeds are marked prefilter:false in rss_sources.yaml.
-EN_KEYWORDS = [
-    "artificial intelligence", "machine learning", "large language model", "llm",
-    "gpt", "chatgpt", "openai", "anthropic", "claude", "gemini", "deepmind",
-    "llama", "mistral", "neural", "transformer", "gpu", "semiconductor",
-    "robot", "autonomous", "ai model", "ai chip", "ai agent", "data center", "datacenter",
-]
-
 
 def _write(path: Path, value):
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
@@ -235,12 +231,14 @@ def run():
     normalized = normalize_search_pages(pages, policy)
     clusters = cluster_event_keys(normalized)
 
+    industry_keywords = load_industry_keywords()
+
     def passes_prefilter(item) -> bool:
-        # AI-dedicated feeds skip keyword matching; general sources require a
-        # bilingual keyword hit. Non-RSS discovery defaults to filtering.
+        # Sector-dedicated feeds skip keyword matching; general sources require
+        # a bilingual industry keyword hit. Non-RSS discovery defaults to filtering.
         if any(not feed_prefilter.get(query_id, True) for query_id in item.query_ids):
             return True
-        return keyword_prefilter(item.title + " " + item.snippet, A_SHARE_KEYWORDS + EN_KEYWORDS)
+        return keyword_prefilter(item.title + " " + item.snippet, industry_keywords)
 
     # Freshness window: drop candidates whose feed-reported publish time falls
     # outside the lookback window; items without a parseable date are kept
