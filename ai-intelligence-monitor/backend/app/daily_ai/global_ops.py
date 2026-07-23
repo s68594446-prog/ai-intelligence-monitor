@@ -4,6 +4,10 @@ from app.web_discovery.contracts import ClassifiedTier
 from app.web_discovery.source_policy import WebSourcePolicy, classify_url
 
 
+def _contains_cjk(text: str) -> bool:
+    return any("一" <= ch <= "鿿" for ch in text)
+
+
 PROHIBITED_ADVICE = (
     "买入", "卖出", "目标价", "建议增持", "建议减持", "建仓", "涨停",
     "price target", "buy rating", "sell rating", "should buy", "should sell",
@@ -50,6 +54,10 @@ def check_global_channel(
         "secondhand_origin_noted": all(
             a.sourcing != "SECONDHAND_REPORT" or bool(a.original_source.strip()) for a in analyses
         ),
+        # The digest is a news product: at most one research paper per day.
+        "research_paper_quota": sum(item.get("news_category") == "RESEARCH_PAPER" for item in digest_items) <= 1,
+        # The reader-facing narrative must be Chinese (headline may be bilingual).
+        "output_in_chinese": all(_contains_cjk(a.what_happened) and _contains_cjk(a.why_it_matters) for a in analyses),
     }
     return GlobalOpsResult(
         passed=all(checks.values()),

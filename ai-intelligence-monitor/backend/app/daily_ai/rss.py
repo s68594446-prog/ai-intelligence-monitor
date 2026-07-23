@@ -8,6 +8,7 @@ the original page and exact evidence quotes.
 import hashlib
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 
 import httpx
 
@@ -24,6 +25,21 @@ class RssError(RuntimeError):
 
 def _text(node) -> str:
     return (node.text or "").strip() if node is not None else ""
+
+
+def parse_feed_date(value: str) -> datetime | None:
+    """Parse RFC822 (RSS) or ISO-8601 (Atom) dates; None when unparseable."""
+    if not value:
+        return None
+    for parser in (parsedate_to_datetime, datetime.fromisoformat):
+        try:
+            parsed = parser(value.replace("Z", "+00:00") if parser is datetime.fromisoformat else value)
+        except (ValueError, TypeError):
+            continue
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    return None
 
 
 def _parse_items(body: bytes) -> list[dict]:
@@ -81,6 +97,7 @@ class RssDiscoveryAdapter:
             ProviderSearchHit(
                 title=item["title"][:500] or "Untitled", url=item["url"],
                 snippet=item["summary"][:2000], rank=rank, discovered_at=now,
+                published_at=parse_feed_date(item["published"]),
                 source_metadata={
                     "feed_name": feed_name, "published_at_reported": item["published"][:50],
                     "title_policy": "DISCOVERY_ONLY", "snippet_policy": "DISCOVERY_ONLY",

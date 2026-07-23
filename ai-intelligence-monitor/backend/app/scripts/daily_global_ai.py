@@ -34,6 +34,7 @@ from app.web_discovery.fetch import WebPageFetcher
 from app.web_discovery.normalize import cluster_event_keys, normalize_search_pages
 from app.web_discovery.providers import SearXNGWebSearchAdapter
 from app.web_discovery.query_plan import load_query_plan
+from app.web_discovery.security import canonicalize_url
 from app.web_discovery.source_policy import load_source_policy
 
 
@@ -41,7 +42,23 @@ CONFIG_DIR = Path(__file__).resolve().parents[3] / "config/daily_ai"
 QUERY_PLAN_PATH = CONFIG_DIR / "cn_ai_queries.yaml"
 SOURCE_POLICY_PATH = CONFIG_DIR / "daily_ai_source_policy.yaml"
 RSS_SOURCES_PATH = CONFIG_DIR / "rss_sources.yaml"
-PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts/daily_global_ai_analysis_v1.txt"
+PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts/daily_global_ai_analysis_v2.txt"
+
+# Board-balancing is a fetch-budget concern only; the final GLOBAL/CHINA
+# section of each item is still decided by the analysis contract from the
+# event's actors, never by the article's origin.
+CHINA_FETCH_SHARE = 0.4
+ARXIV_FETCH_CAP = 3
+CN_BOARD_DOMAINS = {
+    "36kr.com", "qbitai.com", "jiqizhixin.com", "leiphone.com", "caixin.com",
+    "baidu.com", "aliyun.com", "tencent.com", "bytedance.com", "volcengine.com",
+    "huawei.com", "iflytek.com", "minimaxi.com", "deepseek.com",
+}
+
+
+def _is_cn_domain(domain: str) -> bool:
+    host = domain.casefold()
+    return host.endswith(".cn") or any(host == d or host.endswith("." + d) for d in CN_BOARD_DOMAINS)
 
 # Bilingual AI relevance terms for general (non-AI-dedicated) discovery
 # sources; AI-dedicated feeds are marked prefilter:false in rss_sources.yaml.
@@ -71,6 +88,7 @@ def _args():
     parser.add_argument("--max-results", type=int, default=3)
     parser.add_argument("--max-fetch", type=int, default=3)
     parser.add_argument("--max-analyze", type=int, default=2)
+    parser.add_argument("--lookback-hours", type=int, default=48, help="only items published within this window (unknown dates kept)")
     args = parser.parse_args()
     if args.send:
         print("status=BLOCKED")
@@ -84,7 +102,7 @@ def _args():
         raise SystemExit("--render requires --analyze")
     if args.a_share and not args.fetch:
         raise SystemExit("--a-share requires --fetch")
-    if not 1 <= args.max_queries <= 13 or not 1 <= args.max_results <= 5 or not 1 <= args.max_fetch <= 10 or not 1 <= args.max_analyze <= 8:
+    if not 1 <= args.max_queries <= 13 or not 1 <= args.max_results <= 5 or not 1 <= args.max_fetch <= 60 or not 1 <= args.max_analyze <= 40 or not 1 <= args.lookback_hours <= 96:
         raise SystemExit("budgets out of bounds")
     return args
 
@@ -224,11 +242,45 @@ def run():
             return True
         return keyword_prefilter(item.title + " " + item.snippet, A_SHARE_KEYWORDS + EN_KEYWORDS)
 
+    # Freshness window: drop candidates whose feed-reported publish time falls
+    # outside the lookback window; items without a parseable date are kept
+    # (feeds are chronological and per-feed max_items already bounds staleness).
+    cutoff = now - timedelta(hours=args.lookback_hours)
+    published_by_url: dict[str, datetime] = {}
+    for page in pages:
+        for hit in page.results:
+            if hit.published_at is not None:
+                try:
+                    published_by_url.setdefault(canonicalize_url(hit.url), hit.published_at)
+                except ValueError:
+                    continue
+
+    def is_fresh(item) -> bool:
+        published = published_by_url.get(item.canonical_url)
+        return published is None or published >= cutoff
+
     candidates = [
         item for item in normalized
-        if item.source_tier in {ClassifiedTier.T1, ClassifiedTier.T2} and passes_prefilter(item)
+        if item.source_tier in {ClassifiedTier.T1, ClassifiedTier.T2} and passes_prefilter(item) and is_fresh(item)
     ]
+    stale_dropped = sum(
+        1 for item in normalized
+        if item.source_tier in {ClassifiedTier.T1, ClassifiedTier.T2} and passes_prefilter(item) and not is_fresh(item)
+    )
     candidates.sort(key=lambda item: (0 if item.source_tier == ClassifiedTier.T1 else 1, item.best_rank))
+    # Fetch-budget balancing: reserve a China share so T1 global feeds cannot
+    # crowd out the China board, and cap arXiv so papers cannot crowd out news.
+    cn_pool = [item for item in candidates if _is_cn_domain(item.source_domain)]
+    arxiv_pool = [item for item in candidates if item not in cn_pool and (item.source_domain == "arxiv.org" or item.source_domain.endswith(".arxiv.org"))]
+    global_pool = [item for item in candidates if item not in cn_pool and item not in arxiv_pool]
+    cn_budget = min(len(cn_pool), round(args.max_fetch * CHINA_FETCH_SHARE))
+    arxiv_budget = min(len(arxiv_pool), ARXIV_FETCH_CAP)
+    global_budget = args.max_fetch - cn_budget - arxiv_budget
+    fetch_plan = global_pool[:global_budget] + cn_pool[:cn_budget] + arxiv_pool[:arxiv_budget]
+    spare = args.max_fetch - len(fetch_plan)
+    if spare > 0:  # hand unused share back to whichever pool has leftovers (papers stay capped)
+        leftovers = [item for item in global_pool[global_budget:] + cn_pool[cn_budget:] if item not in fetch_plan]
+        fetch_plan.extend(leftovers[:spare])
     _write(run_dir / "01-search-results.json", {
         "run_id": run_id, "pages": [p.model_dump(mode="json") for p in pages],
         "discovery_status": discovery_status,
@@ -245,7 +297,7 @@ def run():
         allowed = {item.canonical_url for item in candidates}
         analyzer = None
         try:
-            for candidate in candidates[: args.max_fetch]:
+            for candidate in fetch_plan:
                 result = fetcher.fetch(candidate, allowed_urls=allowed)
                 if result.status.value != "SUCCESS":
                     blocked.append({"url": candidate.canonical_url, "tier": candidate.source_tier.value, "status": result.status.value, "error_code": result.error_code})
@@ -311,7 +363,9 @@ def run():
         "run_id": run_id, "status": "COMPLETED", "queries": len(queries),
         "discovery_status": discovery_status,
         "search_results": sum(len(p.results) for p in pages), "normalized": len(normalized),
-        "eligible_t1_t2": len(candidates), "fetched": len(sources), "blocked": len(blocked),
+        "eligible_t1_t2": len(candidates), "stale_dropped": stale_dropped,
+        "fetch_plan": {"global": len([c for c in fetch_plan if c in global_pool]), "china": len([c for c in fetch_plan if c in cn_pool]), "arxiv": len([c for c in fetch_plan if c in arxiv_pool])},
+        "fetched": len(sources), "blocked": len(blocked),
         "analyze_attempts": analyze_attempts, "analyzed": len(analyses),
         "analysis_failures": len(analysis_failures), "digest_items": len(digest_items),
         "ops_passed": ops.passed,

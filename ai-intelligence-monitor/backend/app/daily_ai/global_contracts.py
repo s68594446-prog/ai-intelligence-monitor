@@ -42,9 +42,20 @@ GlobalTopic = Literal[
 ]
 
 
+NewsCategory = Literal[
+    "COMPANY_RELEASE",       # major model/product/feature launches
+    "BUSINESS_FUNDING_MA",   # funding, M&A, commercial moves
+    "POLICY_REGULATION",     # regulation and policy originals
+    "TECH_BREAKTHROUGH",     # significant deployed technical advances
+    "RESEARCH_PAPER",        # academic papers (hard digest quota: max 1)
+    "OTHER",
+]
+
+
 class GlobalAiAnalysisContract(StrictModel):
     headline: str = Field(min_length=1, max_length=300)
     topic: GlobalTopic
+    news_category: NewsCategory
     # Section is decided by the actors and jurisdiction of the event itself,
     # never by the language of the article reporting it.
     region_section: Literal["GLOBAL", "CHINA"]

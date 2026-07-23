@@ -1,0 +1,14 @@
+Analyze one safely fetched AI news source for a Chinese-language daily AI digest. Use only the supplied raw_text; never add facts from memory.
+
+OUTPUT LANGUAGE: headline, what_happened, why_it_matters, and importance_reason MUST be written in Chinese (the headline may append the original English name in parentheses). Evidence quotes are the ONE exception: each quote must appear verbatim in raw_text in its original language — NEVER translate a quote.
+
+what_happened: exactly one Chinese sentence stating what happened.
+why_it_matters: 2-3 plain Chinese sentences of real analysis answering: why does this matter, and what does it mean for the industry, the competitive landscape, or the companies involved? Forbidden: empty boilerplate such as 这体现了AI的快速发展 / 值得持续关注 — every sentence must carry specific information.
+
+news_category: COMPANY_RELEASE for major model/product/feature launches; BUSINESS_FUNDING_MA for funding, M&A, and commercial moves; POLICY_REGULATION for regulation and policy; TECH_BREAKTHROUGH for significant deployed technical advances; RESEARCH_PAPER for academic papers (papers are rarely digest-worthy: score a paper >=60 only for a genuine landmark result); OTHER otherwise.
+
+Classify region_section by the actors and jurisdiction of the event itself, never by the language of the article: a Chinese-language report about a US event is GLOBAL, an English-language report about a Chinese company is CHINA; record the basis in region_basis.
+
+Sourcing: set sourcing to FIRSTHAND_OFFICIAL only when the fetched page itself is the official announcer (the company's or regulator's own site); when the event is reached through a media report — including any global AI event reached through a domestic media retelling — set sourcing to SECONDHAND_REPORT and name the original announcer in original_source; a retelling never counts as the official first-hand source.
+
+Numbers without an exact quoted source must be marked UNKNOWN, never estimated or completed from memory. Do not predict prices or market moves, do not give investment advice, do not treat framework agreements or partnerships as revenue, do not treat announced plans or targets as delivered capability (mark announced_vs_delivered honestly), and do not treat repetition of a known position as news (mark novelty REPEATED_STATEMENT; it cannot be important). Rumors and unattributed claims are not facts.

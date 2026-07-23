@@ -15,7 +15,7 @@ concurrency:
 jobs:
   digest:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -34,9 +34,9 @@ jobs:
           JUHE_HEADLINES_API_KEY: ${{ secrets.JUHE_HEADLINES_API_KEY }}
           JUHE_AI_BRIEF_ENABLED: "true"
           JUHE_AI_BRIEF_API_KEY: ${{ secrets.JUHE_AI_BRIEF_API_KEY }}
-        # Conservative first-run budgets: at most 8 page fetches and 6
-        # DeepSeek calls per run across both boards; raise after validation.
-        run: python -m app.scripts.daily_global_ai --rss --juhe --fetch --analyze --render --max-fetch 8 --max-analyze 6
+        # Scaled budgets: up to 50 page fetches and 35 DeepSeek calls per run
+        # across both boards, 48h freshness window.
+        run: python -m app.scripts.daily_global_ai --rss --juhe --fetch --analyze --render --max-fetch 50 --max-analyze 35 --lookback-hours 48
       - name: Upload full run artifacts (audit trail)
         if: always()
         uses: actions/upload-artifact@v4
@@ -54,13 +54,29 @@ jobs:
           DAY=$(TZ=Asia/Shanghai date +%F)
           mkdir -p digests
           cp "$DIGEST" "digests/${DAY}.md"
-          OPS=$(ls -d ai-intelligence-monitor/runs/*-daily-ai/ops.json 2>/dev/null | tail -1)
-          if [ -n "$OPS" ]; then
+          RUN_DIR=$(dirname "$DIGEST")
+          {
+            echo ""
+            echo "---"
+            echo "## 审计（本次 run 自报告）"
+          } >> "digests/${DAY}.md"
+          for AUDIT in ops.json analysis-failures.json; do
+            if [ -f "$RUN_DIR/$AUDIT" ]; then
+              {
+                echo ""
+                echo "### $AUDIT"
+                echo '```json'
+                cat "$RUN_DIR/$AUDIT"
+                echo '```'
+              } >> "digests/${DAY}.md"
+            fi
+          done
+          if [ -f "$RUN_DIR/02-fetch.json" ]; then
             {
               echo ""
-              echo "---"
+              echo "### blocked"
               echo '```json'
-              cat "$OPS"
+              python -c "import json,sys;print(json.dumps(json.load(open(sys.argv[1])).get('blocked',[]),ensure_ascii=False,indent=2))" "$RUN_DIR/02-fetch.json"
               echo '```'
             } >> "digests/${DAY}.md"
           fi
