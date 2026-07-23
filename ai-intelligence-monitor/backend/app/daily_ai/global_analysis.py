@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 
 from openai import APIError, APITimeoutError, OpenAI
@@ -8,12 +9,43 @@ from app.daily_ai.global_contracts import GlobalAiAnalysisContract, closest_snip
 from app.pipeline.errors import LLMAdapterTimeout, LLMOutputValidationError, LLMProviderError
 
 
+# The model only sees the first slice of very long pages to stay inside the
+# context window; evidence quotes are still validated against the FULL
+# raw_text (a superset), so the verbatim discipline is unaffected.
+ANALYSIS_INPUT_MAX_CHARS = 50_000
+
+
 class EvidenceMismatch(LLMOutputValidationError):
     """Evidence quote failed verbatim validation; carries per-quote diagnostics."""
 
     def __init__(self, message: str, *, diagnostics: list[dict]):
         super().__init__(message)
         self.diagnostics = diagnostics
+
+
+class AnalysisOutputError(LLMOutputValidationError):
+    """Model output unusable (empty/truncated/non-JSON/schema); carries response diagnostics."""
+
+    def __init__(self, message: str, *, diagnostics: dict):
+        super().__init__(message)
+        self.diagnostics = diagnostics
+
+
+class ProviderCallError(LLMProviderError):
+    """Provider API call failed; carries HTTP-level diagnostics without credentials."""
+
+    def __init__(self, message: str, *, diagnostics: dict):
+        super().__init__(message)
+        self.diagnostics = diagnostics
+
+
+def _strip_code_fence(content: str) -> str:
+    """Unwrap a ```json ... ``` markdown fence; the JSON inside is still strictly validated."""
+    text = content.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```[a-zA-Z0-9_-]*\s*", "", text)
+        text = re.sub(r"\s*```$", "", text)
+    return text
 
 
 class DeepSeekGlobalAiAnalysisAdapter:
@@ -33,7 +65,12 @@ class DeepSeekGlobalAiAnalysisAdapter:
         )
 
     def analyze(self, *, metadata: dict, raw_text: str, source_url: str) -> GlobalAiAnalysisContract:
-        payload = {"metadata": metadata, "source_url": source_url, "raw_text": raw_text}
+        sent_text = raw_text[:ANALYSIS_INPUT_MAX_CHARS]
+        payload = {
+            "metadata": {**metadata, "raw_text_truncated_for_model": len(raw_text) > len(sent_text)},
+            "source_url": source_url,
+            "raw_text": sent_text,
+        }
         try:
             response = self.client.chat.completions.create(
                 model=self.model,
@@ -42,17 +79,44 @@ class DeepSeekGlobalAiAnalysisAdapter:
                     {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
                 ],
                 response_format={"type": "json_object"},
-                max_tokens=3000,
+                max_tokens=6000,
             )
         except (APITimeoutError, TimeoutError) as exc:
             raise LLMAdapterTimeout("global AI analysis timed out") from exc
         except APIError as exc:
-            raise LLMProviderError("global AI analysis provider error") from exc
-        content = response.choices[0].message.content if response.choices else None
+            raise ProviderCallError(
+                "global AI analysis provider error",
+                diagnostics={
+                    "reason_code": "PROVIDER_API_ERROR",
+                    "error_type": type(exc).__name__,
+                    "status_code": getattr(exc, "status_code", None),
+                    "body_head": str(getattr(exc, "body", None) or getattr(exc, "message", exc))[:500],
+                },
+            ) from exc
+        choice = response.choices[0] if getattr(response, "choices", None) else None
+        message = getattr(choice, "message", None) if choice is not None else None
+        content = getattr(message, "content", None) if message is not None else None
+        diagnostics = {
+            "finish_reason": getattr(choice, "finish_reason", None),
+            "usage": str(getattr(response, "usage", None)),
+            "content_length": len(content or ""),
+            "content_head": (content or "")[:500],
+        }
+        if diagnostics["finish_reason"] == "length":
+            raise AnalysisOutputError("global AI analysis output truncated", diagnostics={**diagnostics, "reason_code": "TRUNCATED_OUTPUT"})
+        if not content or not content.strip():
+            raise AnalysisOutputError("global AI analysis returned empty content", diagnostics={**diagnostics, "reason_code": "EMPTY_CONTENT"})
         try:
-            contract = GlobalAiAnalysisContract.model_validate(json.loads(content or ""))
-        except (ValueError, ValidationError) as exc:
-            raise LLMOutputValidationError("global AI analysis schema validation failed") from exc
+            parsed = json.loads(_strip_code_fence(content))
+        except ValueError as exc:
+            raise AnalysisOutputError("global AI analysis returned invalid JSON", diagnostics={**diagnostics, "reason_code": "INVALID_JSON"}) from exc
+        try:
+            contract = GlobalAiAnalysisContract.model_validate(parsed)
+        except ValidationError as exc:
+            raise AnalysisOutputError(
+                "global AI analysis schema validation failed",
+                diagnostics={**diagnostics, "reason_code": "SCHEMA_VALIDATION_FAILED", "validation_errors": str(exc)[:500]},
+            ) from exc
         failed = [
             e for e in contract.evidence
             if not quote_matches(e.quote, raw_text) or str(e.source_url).rstrip("/") != source_url.rstrip("/")

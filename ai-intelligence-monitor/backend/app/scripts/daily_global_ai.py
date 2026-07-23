@@ -13,7 +13,12 @@ from app.daily_ai.analysis import DeepSeekAShareAiAnalysisAdapter
 from app.daily_ai.contracts import AShareUniverse
 from app.daily_ai.digest import render_a_share_section, select_a_share_digest
 from app.daily_ai.discovery import keyword_prefilter, official_source
-from app.daily_ai.global_analysis import DeepSeekGlobalAiAnalysisAdapter, EvidenceMismatch
+from app.daily_ai.global_analysis import (
+    AnalysisOutputError,
+    DeepSeekGlobalAiAnalysisAdapter,
+    EvidenceMismatch,
+    ProviderCallError,
+)
 from app.daily_ai.global_digest import render_global_digest, select_global_digest
 from app.daily_ai.global_ops import check_global_channel
 from app.daily_ai.juhe import JuheAiBriefAdapter, JuheError, JuheHeadlinesAdapter
@@ -124,7 +129,10 @@ def _a_share_stage(*, settings, run_dir, now, analyze: bool, china_existing_coun
             company = next((item for item in company_by_name if item.company_name in raw_text or item.company_name in candidate.title), None)
             if company and analyze and settings.deepseek_api_key and len(analyses) < 1:
                 analyzer = DeepSeekAShareAiAnalysisAdapter(api_key=settings.deepseek_api_key, base_url=settings.deepseek_base_url, model=settings.deepseek_model, timeout_seconds=settings.llm_timeout_seconds, max_retries=settings.llm_max_retries)
-                analyses.append(analyzer.analyze(metadata={"company_name": company.company_name, "security_code": company.security_code, "exchange": company.exchange, "title": candidate.title}, raw_text=raw_text, source_url=candidate.canonical_url))
+                try:
+                    analyses.append(analyzer.analyze(metadata={"company_name": company.company_name, "security_code": company.security_code, "exchange": company.exchange, "title": candidate.title}, raw_text=raw_text, source_url=candidate.canonical_url))
+                except Exception as exc:  # fail-soft: A-share analysis failure never aborts the run
+                    blocked.append({"url": candidate.canonical_url, "error_code": f"ANALYSIS_{type(exc).__name__}", "detail": str(exc)[:300]})
     finally:
         fetch_client.close()
     items = select_a_share_digest(analyses, china_existing_count=china_existing_count)
@@ -254,16 +262,22 @@ def run():
                             timeout_seconds=settings.llm_timeout_seconds, max_retries=settings.llm_max_retries,
                         )
                     analyze_attempts += 1
+                    # Fail-soft: any single-article failure is discarded with an
+                    # audit record and the run continues. Nothing here may abort
+                    # the whole run.
                     try:
                         analyses.append(analyzer.analyze(
                             metadata={"title": result.title or candidate.title, "source_domain": urlsplit(candidate.canonical_url).hostname or "", "source_tier": candidate.source_tier.value},
                             raw_text=result.raw_text, source_url=candidate.canonical_url,
                         ))
                     except EvidenceMismatch as exc:
-                        # Fail-soft: discard this article, keep the audit trail, continue.
                         analysis_failures.append({"url": candidate.canonical_url, "error_code": "EVIDENCE_MISMATCH", "diagnostics": exc.diagnostics})
+                    except (AnalysisOutputError, ProviderCallError) as exc:
+                        analysis_failures.append({"url": candidate.canonical_url, "error_code": exc.diagnostics.get("reason_code", type(exc).__name__), "diagnostics": exc.diagnostics})
                     except (LLMOutputValidationError, LLMAdapterTimeout, LLMProviderError) as exc:
-                        analysis_failures.append({"url": candidate.canonical_url, "error_code": type(exc).__name__})
+                        analysis_failures.append({"url": candidate.canonical_url, "error_code": type(exc).__name__, "detail": str(exc)[:300]})
+                    except Exception as exc:  # absolute fail-soft guard
+                        analysis_failures.append({"url": candidate.canonical_url, "error_code": f"UNEXPECTED_{type(exc).__name__}", "detail": str(exc)[:300]})
         finally:
             fetch_client.close()
     _write(run_dir / "02-fetch.json", {"run_id": run_id, "fetched": [{k: v for k, v in item.items() if k != "raw_text"} for item in sources], "blocked": blocked})
