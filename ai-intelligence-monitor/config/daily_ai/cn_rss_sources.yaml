@@ -1,0 +1,9 @@
+version: cn-rss-sources-v1
+# Feeds verified reachable from GitHub Actions by the env-probe run.
+# jiqizhixin's /rss endpoint failed the probe (not a valid feed) and is
+# excluded; jiqizhixin articles remain fetchable as T2 once discovered
+# through another channel. Feed titles/summaries are DISCOVERY_ONLY.
+feeds:
+  - {name: qbitai, url: 'https://www.qbitai.com/feed', max_items: 10}
+  - {name: kr36, url: 'https://36kr.com/feed', max_items: 10}
+  - {name: leiphone, url: 'https://www.leiphone.com/feed', max_items: 10}

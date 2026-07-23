@@ -1,0 +1,48 @@
+policy_version: cn-ai-source-policy-v1
+coverage_id: cn_daily_ai
+# T1: official first-party only — domestic AI company official sites/blogs,
+# regulator originals, exchanges and CNINFO. Suffix matching covers subdomains
+# (gov.cn covers cac.gov.cn / miit.gov.cn / most.gov.cn; sse.com.cn covers
+# www.sse.com.cn and static.sse.com.cn).
+t1_domains:
+  - baidu.com
+  - aliyun.com
+  - tencent.com
+  - bytedance.com
+  - volcengine.com
+  - zhipuai.cn
+  - bigmodel.cn
+  - moonshot.cn
+  - minimaxi.com
+  - deepseek.com
+  - huawei.com
+  - iflytek.com
+  - gov.cn
+  - sse.com.cn
+  - szse.cn
+  - bse.cn
+  - cninfo.com.cn
+# T2: professional media with a clear source chain. Global AI events reached
+# through these domains are secondhand reports and must carry the original
+# source; they never impersonate T1.
+t2_domains:
+  - jiqizhixin.com
+  - qbitai.com
+  - 36kr.com
+  - infoq.cn
+  - leiphone.com
+  - caixin.com
+t3_domains:
+  - weibo.com
+  - zhihu.com
+  - x.com
+  - twitter.com
+  - reddit.com
+  - medium.com
+  - substack.com
+  - news.ycombinator.com
+rules:
+  unknown_domain: UNVERIFIED
+  t3_discovery_only: true
+  new_t1_requires_manual_approval: true
+  single_t3_cannot_send_alert: true

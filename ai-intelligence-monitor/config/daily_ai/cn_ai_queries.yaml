@@ -1,0 +1,10 @@
+plan_version: cn-ai-query-plan-v1
+coverage_id: cn_daily_ai
+default_time_range: 48h
+queries:
+  - {id: cn_llm_release_zh, variable: domestic foundation models, purpose: domestic large-model releases and upgrades, language: zh, time_range: 48h, query: '大模型 发布 升级 开源 官方 百度 阿里 智谱 DeepSeek 月之暗面'}
+  - {id: cn_ai_chip_zh, variable: domestic ai chips, purpose: domestic AI chip and compute localization, language: zh, time_range: 48h, query: 'AI芯片 国产 算力 昇腾 寒武纪 海光 流片 量产'}
+  - {id: cn_ai_apps_zh, variable: ai application deployment, purpose: real AI application deployments in industry, language: zh, time_range: 48h, query: 'AI 应用 落地 企业 部署 上线 官方 发布'}
+  - {id: cn_regulation_zh, variable: ai regulation policy, purpose: regulator originals and policy documents, language: zh, time_range: 48h, query: '人工智能 监管 政策 网信办 工信部 科技部 办法 征求意见'}
+  - {id: cn_funding_zh, variable: ai funding, purpose: disclosed domestic AI funding rounds, language: zh, time_range: 48h, query: 'AI 大模型 融资 亿元 轮 投资 官宣'}
+  - {id: global_via_cn_zh, variable: global ai events domestic coverage, purpose: domestic reporting of major global AI events, language: zh, time_range: 48h, query: 'OpenAI Anthropic 谷歌 英伟达 发布 模型 芯片 大事件'}
