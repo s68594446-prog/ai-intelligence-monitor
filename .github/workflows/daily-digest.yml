@@ -34,7 +34,9 @@ jobs:
           JUHE_HEADLINES_API_KEY: ${{ secrets.JUHE_HEADLINES_API_KEY }}
           JUHE_AI_BRIEF_ENABLED: "true"
           JUHE_AI_BRIEF_API_KEY: ${{ secrets.JUHE_AI_BRIEF_API_KEY }}
-        run: python -m app.scripts.daily_global_ai --rss --juhe --fetch --analyze --render --max-fetch 6 --max-analyze 4
+        # Conservative first-run budgets: at most 8 page fetches and 6
+        # DeepSeek calls per run across both boards; raise after validation.
+        run: python -m app.scripts.daily_global_ai --rss --juhe --fetch --analyze --render --max-fetch 8 --max-analyze 6
       - name: Upload full run artifacts (audit trail)
         if: always()
         uses: actions/upload-artifact@v4

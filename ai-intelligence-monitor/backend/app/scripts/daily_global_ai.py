@@ -33,9 +33,18 @@ from app.web_discovery.source_policy import load_source_policy
 
 CONFIG_DIR = Path(__file__).resolve().parents[3] / "config/daily_ai"
 QUERY_PLAN_PATH = CONFIG_DIR / "cn_ai_queries.yaml"
-SOURCE_POLICY_PATH = CONFIG_DIR / "cn_ai_source_policy.yaml"
-RSS_SOURCES_PATH = CONFIG_DIR / "cn_rss_sources.yaml"
+SOURCE_POLICY_PATH = CONFIG_DIR / "daily_ai_source_policy.yaml"
+RSS_SOURCES_PATH = CONFIG_DIR / "rss_sources.yaml"
 PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts/daily_global_ai_analysis_v1.txt"
+
+# Bilingual AI relevance terms for general (non-AI-dedicated) discovery
+# sources; AI-dedicated feeds are marked prefilter:false in rss_sources.yaml.
+EN_KEYWORDS = [
+    "artificial intelligence", "machine learning", "large language model", "llm",
+    "gpt", "chatgpt", "openai", "anthropic", "claude", "gemini", "deepmind",
+    "llama", "mistral", "neural", "transformer", "gpu", "semiconductor",
+    "robot", "autonomous", "ai model", "ai chip", "ai agent", "data center", "datacenter",
+]
 
 
 def _write(path: Path, value):
@@ -69,7 +78,7 @@ def _args():
         raise SystemExit("--render requires --analyze")
     if args.a_share and not args.fetch:
         raise SystemExit("--a-share requires --fetch")
-    if not 1 <= args.max_queries <= 13 or not 1 <= args.max_results <= 5 or not 1 <= args.max_fetch <= 6 or not 1 <= args.max_analyze <= 4:
+    if not 1 <= args.max_queries <= 13 or not 1 <= args.max_results <= 5 or not 1 <= args.max_fetch <= 10 or not 1 <= args.max_analyze <= 8:
         raise SystemExit("budgets out of bounds")
     return args
 
@@ -165,11 +174,13 @@ def run():
             discovery_status["searxng"] = "SUCCESS"
         finally:
             search.close()
+    feed_prefilter: dict[str, bool] = {}
     if args.rss:
         feeds = yaml.safe_load(RSS_SOURCES_PATH.read_text(encoding="utf-8"))["feeds"]
         rss = RssDiscoveryAdapter(timeout_seconds=settings.web_search_timeout_seconds)
         try:
             for feed in feeds:
+                feed_prefilter[f"rss_{feed['name']}"] = bool(feed.get("prefilter", True))
                 query = SearchQuery(query_id=f"rss_{feed['name']}", text=f"rss:{feed['url']}", variable="daily_cn_ai", purpose="rss_discovery", language="zh", time_range="48h", plan_version=plan.plan_version)
                 try:
                     pages.append(rss.fetch_feed(feed_name=feed["name"], feed_url=feed["url"], max_items=int(feed.get("max_items", 10)), query=query))
@@ -196,10 +207,17 @@ def run():
                 discovery_status[name] = exc.code.value
     normalized = normalize_search_pages(pages, policy)
     clusters = cluster_event_keys(normalized)
+
+    def passes_prefilter(item) -> bool:
+        # AI-dedicated feeds skip keyword matching; general sources require a
+        # bilingual keyword hit. Non-RSS discovery defaults to filtering.
+        if any(not feed_prefilter.get(query_id, True) for query_id in item.query_ids):
+            return True
+        return keyword_prefilter(item.title + " " + item.snippet, A_SHARE_KEYWORDS + EN_KEYWORDS)
+
     candidates = [
         item for item in normalized
-        if item.source_tier in {ClassifiedTier.T1, ClassifiedTier.T2}
-        and keyword_prefilter(item.title + " " + item.snippet, A_SHARE_KEYWORDS)
+        if item.source_tier in {ClassifiedTier.T1, ClassifiedTier.T2} and passes_prefilter(item)
     ]
     candidates.sort(key=lambda item: (0 if item.source_tier == ClassifiedTier.T1 else 1, item.best_rank))
     _write(run_dir / "01-search-results.json", {

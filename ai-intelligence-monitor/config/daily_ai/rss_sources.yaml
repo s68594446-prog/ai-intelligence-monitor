@@ -1,0 +1,32 @@
+version: daily-ai-rss-sources-v2
+# Every feed below returned 200 with a valid RSS/Atom body when probed on
+# 2026-07-23 (global feeds TLS-verified from the local machine; qbitai/36kr
+# additionally verified from the GitHub Actions env-probe; leiphone verified
+# locally only). Feeds without a valid endpoint were excluded, not guessed:
+#   - anthropic.com: no public RSS endpoint (404 on /rss.xml and /news/rss.xml)
+#   - ai.meta.com, about.fb.com: no valid feed (404)
+#   - blogs.microsoft.com/ai: 410 Gone; replaced by news.microsoft.com Source AI topic
+#   - jiqizhixin.com/rss: not a valid feed (Actions probe)
+# Their announcements still reach the digest through T2 media / Hacker News as
+# SECONDHAND_REPORT with original_source named — never impersonating T1.
+#
+# prefilter: false = the feed is AI-dedicated, items pass without keyword match.
+# prefilter: true  = general feed, items must match the bilingual AI keyword list.
+# A single failing feed is recorded per-feed and never aborts the run.
+feeds:
+  # --- global, official first-party (T1 by source policy) ---
+  - {name: openai, url: 'https://openai.com/news/rss.xml', max_items: 10, prefilter: false}
+  - {name: google_ai, url: 'https://blog.google/technology/ai/rss/', max_items: 10, prefilter: false}
+  - {name: deepmind, url: 'https://deepmind.google/blog/rss.xml', max_items: 10, prefilter: false}
+  - {name: nvidia, url: 'https://blogs.nvidia.com/feed/', max_items: 10, prefilter: false}
+  - {name: microsoft_ai, url: 'https://news.microsoft.com/source/topics/ai/feed/', max_items: 10, prefilter: false}
+  - {name: arxiv_cs_ai, url: 'https://rss.arxiv.org/rss/cs.AI', max_items: 3, prefilter: false}
+  - {name: arxiv_cs_lg, url: 'https://rss.arxiv.org/rss/cs.LG', max_items: 3, prefilter: false}
+  # --- global, professional media (T2) / aggregator (T3 discovery-only) ---
+  - {name: techcrunch_ai, url: 'https://techcrunch.com/category/artificial-intelligence/feed/', max_items: 10, prefilter: false}
+  - {name: verge_ai, url: 'https://www.theverge.com/rss/ai-artificial-intelligence/index.xml', max_items: 10, prefilter: false}
+  - {name: hackernews, url: 'https://news.ycombinator.com/rss', max_items: 15, prefilter: true}
+  # --- China (T2 media; item links may reach T1 official pages) ---
+  - {name: qbitai, url: 'https://www.qbitai.com/feed', max_items: 10, prefilter: false}
+  - {name: kr36, url: 'https://36kr.com/feed', max_items: 10, prefilter: true}
+  - {name: leiphone, url: 'https://www.leiphone.com/feed', max_items: 10, prefilter: true}

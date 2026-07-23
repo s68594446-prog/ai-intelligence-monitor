@@ -1,0 +1,77 @@
+policy_version: daily-ai-source-policy-v2
+coverage_id: cn_daily_ai
+# Unified global + China spectrum for the daily AI digest.
+# T1: official first-party only — AI lab/company official sites, regulator
+# originals, research preprint archive, exchanges and CNINFO. Suffix matching
+# covers subdomains (microsoft.com covers news.microsoft.com; nvidia.com covers
+# blogs.nvidia.com; gov.cn covers cac/miit/most.gov.cn; europa.eu covers
+# ec.europa.eu; sse.com.cn covers www/static.sse.com.cn).
+t1_domains:
+  - openai.com
+  - anthropic.com
+  - deepmind.google
+  - blog.google
+  - ai.meta.com
+  - microsoft.com
+  - nvidia.com
+  - amd.com
+  - aboutamazon.com
+  - aws.amazon.com
+  - apple.com
+  - mistral.ai
+  - x.ai
+  - cohere.com
+  - arxiv.org
+  - whitehouse.gov
+  - nist.gov
+  - gov.uk
+  - europa.eu
+  - baidu.com
+  - aliyun.com
+  - tencent.com
+  - bytedance.com
+  - volcengine.com
+  - zhipuai.cn
+  - bigmodel.cn
+  - moonshot.cn
+  - minimaxi.com
+  - deepseek.com
+  - huawei.com
+  - iflytek.com
+  - gov.cn
+  - sse.com.cn
+  - szse.cn
+  - bse.cn
+  - cninfo.com.cn
+# T2: professional media with a clear source chain. No content farms.
+t2_domains:
+  - reuters.com
+  - bloomberg.com
+  - ft.com
+  - wsj.com
+  - theinformation.com
+  - techcrunch.com
+  - theverge.com
+  - arstechnica.com
+  - wired.com
+  - semianalysis.com
+  - jiqizhixin.com
+  - qbitai.com
+  - 36kr.com
+  - infoq.cn
+  - leiphone.com
+  - caixin.com
+t3_domains:
+  - reddit.com
+  - x.com
+  - twitter.com
+  - news.ycombinator.com
+  - medium.com
+  - substack.com
+  - weibo.com
+  - zhihu.com
+rules:
+  unknown_domain: UNVERIFIED
+  t3_discovery_only: true
+  new_t1_requires_manual_approval: true
+  single_t3_cannot_send_alert: true
