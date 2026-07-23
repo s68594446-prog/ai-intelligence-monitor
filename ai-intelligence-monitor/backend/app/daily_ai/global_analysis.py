@@ -4,8 +4,16 @@ from pathlib import Path
 from openai import APIError, APITimeoutError, OpenAI
 from pydantic import ValidationError
 
-from app.daily_ai.global_contracts import GlobalAiAnalysisContract
+from app.daily_ai.global_contracts import GlobalAiAnalysisContract, closest_snippet, quote_matches
 from app.pipeline.errors import LLMAdapterTimeout, LLMOutputValidationError, LLMProviderError
+
+
+class EvidenceMismatch(LLMOutputValidationError):
+    """Evidence quote failed verbatim validation; carries per-quote diagnostics."""
+
+    def __init__(self, message: str, *, diagnostics: list[dict]):
+        super().__init__(message)
+        self.diagnostics = diagnostics
 
 
 class DeepSeekGlobalAiAnalysisAdapter:
@@ -45,6 +53,21 @@ class DeepSeekGlobalAiAnalysisAdapter:
             contract = GlobalAiAnalysisContract.model_validate(json.loads(content or ""))
         except (ValueError, ValidationError) as exc:
             raise LLMOutputValidationError("global AI analysis schema validation failed") from exc
-        if any(e.quote not in raw_text or str(e.source_url).rstrip("/") != source_url.rstrip("/") for e in contract.evidence):
-            raise LLMOutputValidationError("global AI evidence quote mismatch")
+        failed = [
+            e for e in contract.evidence
+            if not quote_matches(e.quote, raw_text) or str(e.source_url).rstrip("/") != source_url.rstrip("/")
+        ]
+        if failed:
+            raise EvidenceMismatch(
+                "global AI evidence quote mismatch",
+                diagnostics=[
+                    {
+                        "model_quote": e.quote,
+                        "url_expected": source_url,
+                        "url_given": str(e.source_url),
+                        **closest_snippet(e.quote, raw_text),
+                    }
+                    for e in failed
+                ],
+            )
         return contract

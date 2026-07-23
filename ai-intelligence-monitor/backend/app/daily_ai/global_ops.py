@@ -1,4 +1,4 @@
-from app.daily_ai.global_contracts import GlobalAiAnalysisContract, GlobalOpsResult
+from app.daily_ai.global_contracts import GlobalAiAnalysisContract, GlobalOpsResult, quote_matches
 from app.daily_ai.global_digest import CHINA_LIMIT, GLOBAL_LIMIT, TOTAL_LIMIT
 from app.web_discovery.contracts import ClassifiedTier
 from app.web_discovery.source_policy import WebSourcePolicy, classify_url
@@ -16,6 +16,7 @@ def check_global_channel(
     raw_text_by_url: dict[str, str],
     digest_items: list[dict],
     policy: WebSourcePolicy,
+    discarded_evidence_failures: int = 0,
 ) -> GlobalOpsResult:
     def evidence_tier_ok(url: str) -> bool:
         return classify_url(url, policy)[0] in {ClassifiedTier.T1, ClassifiedTier.T2}
@@ -25,7 +26,7 @@ def check_global_channel(
         "china_limit": sum(item["section"] == "CHINA" for item in digest_items) <= CHINA_LIMIT,
         "total_limit": len(digest_items) <= TOTAL_LIMIT,
         "evidence_exact": all(
-            all(e.quote in raw_text_by_url.get(str(e.source_url), "") for e in a.evidence) for a in analyses
+            all(quote_matches(e.quote, raw_text_by_url.get(str(e.source_url), "")) for e in a.evidence) for a in analyses
         ),
         "evidence_tier": all(all(evidence_tier_ok(str(e.source_url)) for e in a.evidence) for a in analyses),
         "numeric_claims_cited": all(
@@ -54,4 +55,8 @@ def check_global_channel(
         passed=all(checks.values()),
         checks=checks,
         errors=[name for name, passed in checks.items() if not passed],
+        stats={
+            "analyses_accepted": len(analyses),
+            "analyses_discarded_evidence_mismatch": discarded_evidence_failures,
+        },
     )

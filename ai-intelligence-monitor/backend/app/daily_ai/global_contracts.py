@@ -1,8 +1,38 @@
+import difflib
+import re
 from typing import Literal
 
 from pydantic import Field, model_validator
 
 from app.daily_ai.contracts import EvidenceQuote, StrictModel
+
+
+def normalize_ws(text: str) -> str:
+    """Collapse runs of layout whitespace to one space; substantive characters untouched."""
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def quote_matches(quote: str, raw_text: str) -> bool:
+    """Verbatim containment after whitespace normalization on both sides.
+
+    This keeps the verbatim-evidence discipline: any changed, added, or
+    invented non-whitespace character still fails; only layout differences
+    (newlines from HTML extraction, mixed-width spacing) stop causing false
+    negatives.
+    """
+    return normalize_ws(quote) in normalize_ws(raw_text)
+
+
+def closest_snippet(quote: str, raw_text: str, context: int = 60) -> dict:
+    """Diagnostics for a failed quote match: the longest common run and its raw context."""
+    raw_n, quote_n = normalize_ws(raw_text), normalize_ws(quote)
+    match = difflib.SequenceMatcher(None, raw_n, quote_n, autojunk=False).find_longest_match(0, len(raw_n), 0, len(quote_n))
+    start, end = max(0, match.a - context), min(len(raw_n), match.a + match.size + context)
+    return {
+        "quote_chars": len(quote_n),
+        "longest_common_chars": match.size,
+        "raw_closest_context": raw_n[start:end],
+    }
 
 
 GlobalTopic = Literal[
@@ -55,3 +85,4 @@ class GlobalOpsResult(StrictModel):
     passed: bool
     checks: dict[str, bool]
     errors: list[str]
+    stats: dict[str, int] = Field(default_factory=dict)

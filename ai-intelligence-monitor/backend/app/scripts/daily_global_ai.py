@@ -13,13 +13,14 @@ from app.daily_ai.analysis import DeepSeekAShareAiAnalysisAdapter
 from app.daily_ai.contracts import AShareUniverse
 from app.daily_ai.digest import render_a_share_section, select_a_share_digest
 from app.daily_ai.discovery import keyword_prefilter, official_source
-from app.daily_ai.global_analysis import DeepSeekGlobalAiAnalysisAdapter
+from app.daily_ai.global_analysis import DeepSeekGlobalAiAnalysisAdapter, EvidenceMismatch
 from app.daily_ai.global_digest import render_global_digest, select_global_digest
 from app.daily_ai.global_ops import check_global_channel
 from app.daily_ai.juhe import JuheAiBriefAdapter, JuheError, JuheHeadlinesAdapter
 from app.daily_ai.ops import check_a_share_channel
 from app.daily_ai.pdf import SafeOfficialPdfFetcher
 from app.daily_ai.rss import RssDiscoveryAdapter, RssError
+from app.pipeline.errors import LLMAdapterTimeout, LLMOutputValidationError, LLMProviderError
 from app.scripts.daily_a_share_ai import KEYWORDS as A_SHARE_KEYWORDS
 from app.scripts.daily_a_share_ai import SITES as A_SHARE_SITES
 from app.scripts.daily_a_share_ai import _candidate as a_share_candidate
@@ -228,7 +229,8 @@ def run():
         "tier_counts": {tier.value: sum(item.source_tier == tier for item in normalized) for tier in ClassifiedTier},
     })
 
-    sources, blocked, analyses = [], [], []
+    sources, blocked, analyses, analysis_failures = [], [], [], []
+    analyze_attempts = 0
     if args.fetch:
         fetch_client = httpx.Client(timeout=settings.web_search_timeout_seconds, follow_redirects=False, trust_env=False)
         fetcher = WebPageFetcher(client=fetch_client, max_bytes=2_000_000, max_retries=0, minimum_interval_seconds=1)
@@ -241,7 +243,9 @@ def run():
                     blocked.append({"url": candidate.canonical_url, "tier": candidate.source_tier.value, "status": result.status.value, "error_code": result.error_code})
                     continue
                 sources.append({"url": candidate.canonical_url, "tier": candidate.source_tier.value, "title": result.title or candidate.title, "sha256": result.response_sha256, "raw_text": result.raw_text})
-                if args.analyze and len(analyses) < args.max_analyze:
+                # Budget counts DeepSeek attempts (cost), not accepted results:
+                # a discarded article must not buy a free extra call.
+                if args.analyze and analyze_attempts < args.max_analyze:
                     if analyzer is None:
                         analyzer = DeepSeekGlobalAiAnalysisAdapter(
                             api_key=settings.deepseek_api_key or "",
@@ -249,14 +253,22 @@ def run():
                             prompt_path=PROMPT_PATH,
                             timeout_seconds=settings.llm_timeout_seconds, max_retries=settings.llm_max_retries,
                         )
-                    analyses.append(analyzer.analyze(
-                        metadata={"title": result.title or candidate.title, "source_domain": urlsplit(candidate.canonical_url).hostname or "", "source_tier": candidate.source_tier.value},
-                        raw_text=result.raw_text, source_url=candidate.canonical_url,
-                    ))
+                    analyze_attempts += 1
+                    try:
+                        analyses.append(analyzer.analyze(
+                            metadata={"title": result.title or candidate.title, "source_domain": urlsplit(candidate.canonical_url).hostname or "", "source_tier": candidate.source_tier.value},
+                            raw_text=result.raw_text, source_url=candidate.canonical_url,
+                        ))
+                    except EvidenceMismatch as exc:
+                        # Fail-soft: discard this article, keep the audit trail, continue.
+                        analysis_failures.append({"url": candidate.canonical_url, "error_code": "EVIDENCE_MISMATCH", "diagnostics": exc.diagnostics})
+                    except (LLMOutputValidationError, LLMAdapterTimeout, LLMProviderError) as exc:
+                        analysis_failures.append({"url": candidate.canonical_url, "error_code": type(exc).__name__})
         finally:
             fetch_client.close()
     _write(run_dir / "02-fetch.json", {"run_id": run_id, "fetched": [{k: v for k, v in item.items() if k != "raw_text"} for item in sources], "blocked": blocked})
     _write(run_dir / "03-analysis-output.json", [item.model_dump(mode="json") for item in analyses])
+    _write(run_dir / "analysis-failures.json", analysis_failures)
 
     digest_items = select_global_digest(analyses) if args.render else []
     a_share_items, a_share_ops, a_share_counts = [], None, {}
@@ -271,7 +283,10 @@ def run():
             digest_text += "\n\n" + render_a_share_section(a_share_items)
         (run_dir / "04-digest.txt").write_text(digest_text + "\n", encoding="utf-8")
     raw_by_url = {item["url"]: item["raw_text"] for item in sources}
-    ops = check_global_channel(analyses=analyses, raw_text_by_url=raw_by_url, digest_items=digest_items, policy=policy)
+    ops = check_global_channel(
+        analyses=analyses, raw_text_by_url=raw_by_url, digest_items=digest_items, policy=policy,
+        discarded_evidence_failures=sum(item["error_code"] == "EVIDENCE_MISMATCH" for item in analysis_failures),
+    )
     _write(run_dir / "ops.json", ops.model_dump(mode="json"))
     _write(run_dir / "source-bundle.json", {
         "run_id": run_id, "plan_version": plan.plan_version, "policy_version": policy.policy_version,
@@ -283,7 +298,8 @@ def run():
         "discovery_status": discovery_status,
         "search_results": sum(len(p.results) for p in pages), "normalized": len(normalized),
         "eligible_t1_t2": len(candidates), "fetched": len(sources), "blocked": len(blocked),
-        "analyzed": len(analyses), "digest_items": len(digest_items),
+        "analyze_attempts": analyze_attempts, "analyzed": len(analyses),
+        "analysis_failures": len(analysis_failures), "digest_items": len(digest_items),
         "ops_passed": ops.passed,
         **a_share_counts,
     }
