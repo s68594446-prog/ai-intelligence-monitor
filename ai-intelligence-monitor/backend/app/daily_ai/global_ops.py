@@ -16,6 +16,9 @@ def _contains_cjk(text: str) -> bool:
     return any("一" <= ch <= "鿿" for ch in text)
 
 
+CHINESE_NUMERALS = set("〇零一二两三四五六七八九十百千万亿兆")
+
+
 # Pure judgement/advice words: banned unconditionally. Mapping a company onto a
 # supply-chain link is a fact and stays allowed; saying it benefits is not.
 PROHIBITED_ADVICE = (
@@ -39,11 +42,31 @@ PROHIBITED_EQUITY_PATTERNS = (
 )
 
 
-def _violates_advice_rules(payload: str) -> bool:
+def narrative_text(item: GlobalAiAnalysisContract) -> str:
+    """Only model-authored prose. Evidence quotes are verbatim source text: an
+    article about equity rules legitimately contains equity words, and judging
+    our own evidence by the advice rules would flag the source, not the model."""
+    parts = [
+        item.headline, item.what_happened, item.why_it_matters,
+        item.importance_reason, item.transmission_path, item.region_basis,
+        *item.risks_and_counterevidence, *item.uncertainties,
+        *[company for entry in item.chain_mapping for company in entry.companies],
+    ]
+    return " ".join(part for part in parts if part)
+
+
+def advice_violations(item: GlobalAiAnalysisContract) -> list[str]:
+    """Matched prohibited terms/patterns, so a failure names its trigger."""
+    payload = narrative_text(item)
     lowered = payload.casefold()
-    if any(term.casefold() in lowered for term in PROHIBITED_ADVICE):
-        return True
-    return any(pattern.search(payload) for pattern in PROHIBITED_EQUITY_PATTERNS)
+    matched = [term for term in PROHIBITED_ADVICE if term.casefold() in lowered]
+    matched += [
+        match.group(0) for pattern in PROHIBITED_EQUITY_PATTERNS
+        for match in [pattern.search(payload)] if match
+    ]
+    if item.investment_advice:
+        matched.append("investment_advice=true")
+    return matched
 
 
 def check_global_channel(
@@ -58,16 +81,18 @@ def check_global_channel(
         return classify_url(url, policy)[0] in {ClassifiedTier.T1, ClassifiedTier.T2}
 
     def numeric_cited(item: GlobalAiAnalysisContract) -> bool:
+        # Chinese numerals carry quantities without ASCII digits ("数千万种子轮"),
+        # so a quote using them still counts as citing the number.
         return not item.contains_verifiable_numbers or any(
-            any(ch.isdigit() for ch in e.quote) for e in item.evidence
+            any(ch.isdigit() or ch in CHINESE_NUMERALS for ch in e.quote) for e in item.evidence
         )
 
     # Name the offenders so a failure is diagnosable without the raw artifact.
     offenders = {
         "numeric_claims_cited": [a.headline[:80] for a in analyses if not numeric_cited(a)],
         "no_investment_advice": [
-            a.headline[:80] for a in analyses
-            if a.investment_advice or _violates_advice_rules(str(a.model_dump(mode="json")))
+            f"{a.headline[:70]} → 命中：{'/'.join(advice_violations(a))}"
+            for a in analyses if advice_violations(a)
         ],
         "output_in_chinese": [
             a.headline[:80] for a in analyses

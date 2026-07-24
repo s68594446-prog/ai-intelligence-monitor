@@ -24,6 +24,7 @@ from app.daily_ai.global_ops import check_global_channel
 from app.daily_ai.juhe import JuheAiBriefAdapter, JuheError, JuheHeadlinesAdapter
 from app.daily_ai.ops import check_a_share_channel
 from app.daily_ai.pdf import SafeOfficialPdfFetcher
+from app.daily_ai.quality import check_text_quality
 from app.daily_ai.rss import RssDiscoveryAdapter, RssError
 from app.pipeline.errors import LLMAdapterTimeout, LLMOutputValidationError, LLMProviderError
 from app.scripts.daily_a_share_ai import KEYWORDS as A_SHARE_KEYWORDS
@@ -43,7 +44,7 @@ QUERY_PLAN_PATH = CONFIG_DIR / "cn_ai_queries.yaml"
 SOURCE_POLICY_PATH = CONFIG_DIR / "daily_ai_source_policy.yaml"
 RSS_SOURCES_PATH = CONFIG_DIR / "rss_sources.yaml"
 KEYWORDS_PATH = CONFIG_DIR / "industry_keywords.yaml"
-PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts/daily_global_ai_analysis_v4.txt"
+PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts/daily_global_ai_analysis_v5.txt"
 FETCH_MAX_BYTES = 5_000_000
 # A T1 page we cannot fetch (403 / access challenge) may still be reachable
 # through a T2 retelling of the SAME event cluster. That substitute is fetched
@@ -294,6 +295,7 @@ def run():
     })
 
     sources, blocked, analyses, analysis_failures = [], [], [], []
+    analysis_urls: dict[str, str] = {}
     analyze_attempts = 0
     if args.fetch:
         fetch_client = httpx.Client(timeout=settings.web_search_timeout_seconds, follow_redirects=False, trust_env=False)
@@ -341,10 +343,21 @@ def run():
                     # audit record and the run continues. Nothing here may abort
                     # the whole run.
                     try:
-                        analyses.append(analyzer.analyze(
+                        analysis = analyzer.analyze(
                             metadata={"title": result.title or candidate.title, "source_domain": urlsplit(candidate.canonical_url).hostname or "", "source_tier": candidate.source_tier.value},
                             raw_text=result.raw_text, source_url=candidate.canonical_url,
-                        ))
+                        )
+                        quality_reasons = check_text_quality({
+                            "headline": analysis.headline,
+                            "what_happened": analysis.what_happened,
+                            "why_it_matters": analysis.why_it_matters,
+                            "transmission_path": analysis.transmission_path,
+                        })
+                        if quality_reasons:
+                            analysis_failures.append({"url": candidate.canonical_url, "error_code": "LOW_TEXT_QUALITY", "diagnostics": {"reasons": quality_reasons, "headline": analysis.headline[:120]}})
+                        else:
+                            analyses.append(analysis)
+                            analysis_urls[str(analysis.evidence[0].source_url)] = candidate.candidate_id
                     except EvidenceMismatch as exc:
                         analysis_failures.append({"url": candidate.canonical_url, "error_code": "EVIDENCE_MISMATCH", "diagnostics": exc.diagnostics})
                     except (AnalysisOutputError, ProviderCallError) as exc:
@@ -359,7 +372,8 @@ def run():
     _write(run_dir / "03-analysis-output.json", [item.model_dump(mode="json") for item in analyses])
     _write(run_dir / "analysis-failures.json", analysis_failures)
 
-    digest_items = select_global_digest(analyses) if args.render else []
+    cluster_by_url = {url: clusters.get(candidate_id, candidate_id) for url, candidate_id in analysis_urls.items()}
+    digest_items = select_global_digest(analyses, cluster_by_url=cluster_by_url) if args.render else []
     a_share_items, a_share_ops, a_share_counts = [], None, {}
     if args.a_share:
         china_count = sum(item["section"] == "CHINA" for item in digest_items)

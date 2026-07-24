@@ -18,7 +18,21 @@ SECTOR_ORDER = [
 SECTOR_LABELS = dict(SECTOR_ORDER)
 
 
-def select_global_digest(analyses: list[GlobalAiAnalysisContract]) -> list[dict]:
+def _richness(item: GlobalAiAnalysisContract) -> tuple:
+    """How informative an item is, for picking the survivor of a duplicate event."""
+    return (
+        item.importance_score,
+        len(item.why_it_matters),
+        sum(len(entry.companies) for entry in item.chain_mapping),
+        len(item.transmission_path),
+    )
+
+
+def select_global_digest(
+    analyses: list[GlobalAiAnalysisContract],
+    *,
+    cluster_by_url: dict[str, str] | None = None,
+) -> list[dict]:
     eligible = [
         item for item in analyses
         if item.importance_score >= IMPORTANCE_THRESHOLD
@@ -26,14 +40,34 @@ def select_global_digest(analyses: list[GlobalAiAnalysisContract]) -> list[dict]
         and item.novelty != "REPEATED_STATEMENT"
         and item.evidence
     ]
-    eligible.sort(key=lambda item: (-item.importance_score, item.headline))
+    # Same event reported by several sources: keep the most informative write-up
+    # and carry the other outlets as supplementary sources, so one event never
+    # consumes two slots.
+    cluster_by_url = cluster_by_url or {}
+    survivors: dict[str, GlobalAiAnalysisContract] = {}
+    extra_sources: dict[str, list[str]] = {}
+    for item in eligible:
+        url = str(item.evidence[0].source_url)
+        key = cluster_by_url.get(url) or f"url:{url}"
+        current = survivors.get(key)
+        if current is None:
+            survivors[key] = item
+            extra_sources.setdefault(key, [])
+            continue
+        loser_url = url if _richness(item) <= _richness(current) else str(current.evidence[0].source_url)
+        if _richness(item) > _richness(current):
+            survivors[key] = item
+        extra_sources[key].append(loser_url)
+
+    ordered = sorted(survivors.items(), key=lambda pair: (-pair[1].importance_score, pair[1].headline))
     selected: list[dict] = []
     sector_counts: dict[str, int] = {}
-    for item in eligible:
+    for key, item in ordered:
         if len(selected) >= TOTAL_LIMIT or sector_counts.get(item.sector, 0) >= SECTOR_CAP:
             continue
         sector_counts[item.sector] = sector_counts.get(item.sector, 0) + 1
         selected.append({
+            "other_sources": extra_sources.get(key, []),
             "sector": item.sector,
             "importance_criterion": item.importance_criterion,
             "headline": item.headline,
@@ -75,6 +109,8 @@ def _render_item(item: dict) -> str:
     chain = _render_chain(item)
     if chain:
         blocks.append(chain)
+    if item.get("other_sources"):
+        source_line += "\n　　其他来源：" + "、".join(item["other_sources"])
     blocks.append(source_line)
     return "\n\n".join(blocks)
 
