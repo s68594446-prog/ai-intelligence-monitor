@@ -1,0 +1,63 @@
+name: email-digest
+
+# Manual test-send only. This does NOT re-run discovery/analysis — it emails
+# the latest already-committed digest in digests/. Daily auto-send is a
+# separate, still-disabled path; turn it on only after a good test send.
+on:
+  workflow_dispatch:
+    inputs:
+      send:
+        description: "Actually send (true) or Gate dry-run only (false)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: email-digest
+  cancel-in-progress: false
+
+jobs:
+  email:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install backend
+        working-directory: ai-intelligence-monitor/backend
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+      - name: Send (or Gate-check) latest digest email
+        working-directory: ai-intelligence-monitor/backend
+        env:
+          EMAIL_DELIVERY_ENABLED: "true"
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_SECURITY: STARTTLS
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
+          SMTP_TO: ${{ secrets.SMTP_TO }}
+        run: |
+          if [ "${{ inputs.send }}" = "true" ]; then
+            python -m app.scripts.send_digest_email --send
+          else
+            python -m app.scripts.send_digest_email
+          fi
+      - name: Commit send ledger
+        if: ${{ inputs.send }}
+        run: |
+          if [ -z "$(git status --porcelain digests/.email-log.jsonl)" ]; then
+            echo "no ledger change"; exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add digests/.email-log.jsonl
+          git commit -m "email: send ledger update"
+          git pull --rebase origin main
+          git push origin main

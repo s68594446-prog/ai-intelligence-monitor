@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -144,8 +144,13 @@ class Settings(BaseSettings):
     smtp_port: int = Field(default=587, ge=1, le=65535, validation_alias="SMTP_PORT")
     smtp_username: str | None = Field(default=None, validation_alias="SMTP_USERNAME")
     smtp_password: SecretStr | None = Field(default=None, validation_alias="SMTP_PASSWORD")
-    smtp_from_address: str | None = Field(default=None, validation_alias="SMTP_FROM_ADDRESS")
-    smtp_to_addresses: str = Field(default="", validation_alias="SMTP_TO_ADDRESSES")
+    # Accept both the documented names and the shorter SMTP_FROM / SMTP_TO.
+    smtp_from_address: str | None = Field(
+        default=None, validation_alias=AliasChoices("SMTP_FROM_ADDRESS", "SMTP_FROM")
+    )
+    smtp_to_addresses: str = Field(
+        default="", validation_alias=AliasChoices("SMTP_TO_ADDRESSES", "SMTP_TO")
+    )
     smtp_security: Literal["STARTTLS", "SSL"] = Field(
         default="STARTTLS", validation_alias="SMTP_SECURITY"
     )
