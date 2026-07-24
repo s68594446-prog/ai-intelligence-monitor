@@ -43,7 +43,13 @@ QUERY_PLAN_PATH = CONFIG_DIR / "cn_ai_queries.yaml"
 SOURCE_POLICY_PATH = CONFIG_DIR / "daily_ai_source_policy.yaml"
 RSS_SOURCES_PATH = CONFIG_DIR / "rss_sources.yaml"
 KEYWORDS_PATH = CONFIG_DIR / "industry_keywords.yaml"
-PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts/daily_global_ai_analysis_v3.txt"
+PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts/daily_global_ai_analysis_v4.txt"
+FETCH_MAX_BYTES = 5_000_000
+# A T1 page we cannot fetch (403 / access challenge) may still be reachable
+# through a T2 retelling of the SAME event cluster. That substitute is fetched
+# normally and analysed as SECONDHAND_REPORT with its original source named —
+# no anti-bot bypass, no relaxed gate.
+BLOCKED_FALLBACK_CODES = {"HTTP_403", "ACCESS_CHALLENGE", "HTTP_401", "HTTP_429"}
 
 
 def load_industry_keywords() -> list[str]:
@@ -291,12 +297,31 @@ def run():
     analyze_attempts = 0
     if args.fetch:
         fetch_client = httpx.Client(timeout=settings.web_search_timeout_seconds, follow_redirects=False, trust_env=False)
-        fetcher = WebPageFetcher(client=fetch_client, max_bytes=2_000_000, max_retries=0, minimum_interval_seconds=1)
+        fetcher = WebPageFetcher(client=fetch_client, max_bytes=FETCH_MAX_BYTES, max_retries=0, minimum_interval_seconds=1)
         allowed = {item.canonical_url for item in candidates}
+        by_id = {item.candidate_id: item for item in candidates}
+        planned_urls = {item.canonical_url for item in fetch_plan}
         analyzer = None
         try:
-            for candidate in fetch_plan:
+            for candidate in list(fetch_plan):
                 result = fetcher.fetch(candidate, allowed_urls=allowed)
+                if result.status.value != "SUCCESS" and result.error_code in BLOCKED_FALLBACK_CODES:
+                    cluster = clusters.get(candidate.candidate_id)
+                    substitute = next(
+                        (
+                            by_id[other_id] for other_id, key in clusters.items()
+                            if key == cluster and other_id != candidate.candidate_id
+                            and other_id in by_id
+                            and by_id[other_id].source_tier == ClassifiedTier.T2
+                            and by_id[other_id].canonical_url not in planned_urls
+                        ),
+                        None,
+                    )
+                    if substitute is not None:
+                        blocked.append({"url": candidate.canonical_url, "tier": candidate.source_tier.value, "status": result.status.value, "error_code": result.error_code, "fallback_to": substitute.canonical_url})
+                        planned_urls.add(substitute.canonical_url)
+                        candidate = substitute
+                        result = fetcher.fetch(candidate, allowed_urls=allowed)
                 if result.status.value != "SUCCESS":
                     blocked.append({"url": candidate.canonical_url, "tier": candidate.source_tier.value, "status": result.status.value, "error_code": result.error_code})
                     continue

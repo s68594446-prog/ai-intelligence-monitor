@@ -7,25 +7,56 @@ from pydantic import Field, model_validator
 from app.daily_ai.contracts import EvidenceQuote, StrictModel
 
 
+# Presentation-form equivalences only: each pair is the same punctuation mark
+# rendered differently (curly vs straight quotes, dash variants, full-width vs
+# half-width). No letter, digit, or word is ever altered, so a changed number
+# or an invented sentence still fails the match.
+_PUNCT_EQUIVALENTS = {
+    # All quote glyphs fold to one marker: models routinely re-render a double
+    # quote as a single one (and vice versa) when transcribing. Quote-glyph
+    # choice is presentation; the quoted words are what must match.
+    "'": '"', "‘": '"', "’": '"', "‚": '"', "‛": '"',
+    "“": '"', "”": '"', "„": '"', "‟": '"',
+    "′": '"', "″": '"', "«": '"', "»": '"',
+    "「": '"', "」": '"', "『": '"', "』": '"',
+    "‐": "-", "‑": "-", "‒": "-", "–": "-",  # dashes
+    "—": "-", "―": "-", "−": "-",
+    " ": " ", " ": " ", " ": " ", "　": " ",  # spaces
+    "，": ",", "．": ".", "：": ":", "；": ";",  # full-width
+    "？": "?", "！": "!", "（": "(", "）": ")",
+    "％": "%", "…": "...", "・": "-",
+}
+_PUNCT_TABLE = str.maketrans(_PUNCT_EQUIVALENTS)
+# Layout whitespace sitting next to punctuation ("Claude Haiku ," vs
+# "Claude Haiku,") is a rendering artifact of HTML extraction, not content.
+_SPACE_AROUND_PUNCT = re.compile(r"\s*([,.;:!?()\"'%-])\s*")
+
+
 def normalize_ws(text: str) -> str:
     """Collapse runs of layout whitespace to one space; substantive characters untouched."""
     return re.sub(r"\s+", " ", text).strip()
 
 
+def normalize_for_match(text: str) -> str:
+    """Normalize punctuation presentation and layout whitespace only."""
+    folded = text.translate(_PUNCT_TABLE)
+    folded = _SPACE_AROUND_PUNCT.sub(r"\1", folded)
+    return normalize_ws(folded)
+
+
 def quote_matches(quote: str, raw_text: str) -> bool:
-    """Verbatim containment after whitespace normalization on both sides.
+    """Verbatim containment after presentation-form normalization on both sides.
 
     This keeps the verbatim-evidence discipline: any changed, added, or
-    invented non-whitespace character still fails; only layout differences
-    (newlines from HTML extraction, mixed-width spacing) stop causing false
-    negatives.
+    invented letter, digit, or word still fails; only differences in how the
+    same punctuation and layout are rendered stop causing false negatives.
     """
-    return normalize_ws(quote) in normalize_ws(raw_text)
+    return normalize_for_match(quote) in normalize_for_match(raw_text)
 
 
 def closest_snippet(quote: str, raw_text: str, context: int = 60) -> dict:
     """Diagnostics for a failed quote match: the longest common run and its raw context."""
-    raw_n, quote_n = normalize_ws(raw_text), normalize_ws(quote)
+    raw_n, quote_n = normalize_for_match(raw_text), normalize_for_match(quote)
     match = difflib.SequenceMatcher(None, raw_n, quote_n, autojunk=False).find_longest_match(0, len(raw_n), 0, len(quote_n))
     start, end = max(0, match.a - context), min(len(raw_n), match.a + match.size + context)
     return {
@@ -61,10 +92,30 @@ ImportanceCriterion = Literal[
 ]
 
 
+# Digest-worthiness bar, shared by the contract validator and the selector so
+# they can never disagree.
+IMPORTANCE_THRESHOLD = 60
+
+
+class ChainMapEntry(StrictModel):
+    """Objective supply-chain mapping: which link, which companies on it.
+
+    This is a factual mapping ("X is on this link"), never a judgement
+    ("this is good for X"). Judgement language is rejected by Ops.
+    """
+
+    sector: "Sector"
+    companies: list[str] = Field(min_length=1, max_length=8)
+
+
 class GlobalAiAnalysisContract(StrictModel):
     headline: str = Field(min_length=1, max_length=300)
     sector: Sector
     importance_criterion: ImportanceCriterion
+    chain_mapping: list[ChainMapEntry] = Field(default_factory=list, max_length=4)
+    # Upstream/downstream transmission, stated as a factual path, e.g.
+    # "AMD MI450 放量 → HBM 需求 → SK海力士/三星". Empty when there is none.
+    transmission_path: str = ""
     # Section is decided by the actors and jurisdiction of the event itself,
     # never by the language of the article reporting it.
     region_section: Literal["GLOBAL", "CHINA"]
@@ -101,14 +152,17 @@ class GlobalAiAnalysisContract(StrictModel):
 
     @model_validator(mode="after")
     def important_requires_criterion(self):
-        if self.importance_score >= 70 and self.importance_criterion == "NONE":
+        if self.importance_score >= IMPORTANCE_THRESHOLD and self.importance_criterion == "NONE":
             raise ValueError("a digest-worthy item must name a concrete importance criterion")
         return self
 
 
 class GlobalOpsResult(StrictModel):
-    version: Literal["global-ai-ops-v1"] = "global-ai-ops-v1"
+    version: Literal["global-ai-ops-v2"] = "global-ai-ops-v2"
     passed: bool
     checks: dict[str, bool]
     errors: list[str]
+    # Failing item headlines per check, so a failure is diagnosable from the
+    # committed digest without opening the run artifact.
+    offenders: dict[str, list[str]] = Field(default_factory=dict)
     stats: dict[str, int] = Field(default_factory=dict)

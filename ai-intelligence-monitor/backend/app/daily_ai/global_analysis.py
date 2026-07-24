@@ -50,8 +50,8 @@ def _strip_code_fence(content: str) -> str:
 
 class DeepSeekGlobalAiAnalysisAdapter:
     name = "DeepSeekGlobalAiAnalysisAdapter"
-    version = "deepseek-global-ai-v3"
-    prompt_version = "daily-global-ai-analysis-v3"
+    version = "deepseek-global-ai-v4"
+    prompt_version = "daily-global-ai-analysis-v4"
 
     def __init__(self, *, api_key: str, base_url: str, model: str, prompt_path: Path, timeout_seconds: float = 60, max_retries: int = 2, client=None):
         if not api_key:

@@ -1,11 +1,10 @@
-from app.daily_ai.global_contracts import GlobalAiAnalysisContract
+from app.daily_ai.global_contracts import IMPORTANCE_THRESHOLD, GlobalAiAnalysisContract
 
 
-# 覆盖面要广，输出要精：threshold 70 means "genuinely material to the chain".
-# A day with only a few (or zero) qualifying items is a legal, honest digest.
-IMPORTANCE_THRESHOLD = 70
-SECTOR_CAP = 3
-TOTAL_LIMIT = 12
+# 覆盖面要广，输出要精。The bar stays a real bar: a day with few (or zero)
+# qualifying items is a legal, honest digest — never padded to fill space.
+SECTOR_CAP = 5
+TOTAL_LIMIT = 20
 
 SECTOR_ORDER = [
     ("CHIPS_COMPUTE", "芯片与算力"),
@@ -16,6 +15,7 @@ SECTOR_ORDER = [
     ("AI_DEMAND", "应用与需求端"),
     ("MACRO_POLICY", "宏观政策"),
 ]
+SECTOR_LABELS = dict(SECTOR_ORDER)
 
 
 def select_global_digest(analyses: list[GlobalAiAnalysisContract]) -> list[dict]:
@@ -39,6 +39,8 @@ def select_global_digest(analyses: list[GlobalAiAnalysisContract]) -> list[dict]
             "headline": item.headline,
             "what_happened": item.what_happened,
             "analysis": item.why_it_matters,
+            "chain_mapping": [entry.model_dump(mode="json") for entry in item.chain_mapping],
+            "transmission_path": item.transmission_path,
             "url": str(item.evidence[0].source_url),
             "sourcing": item.sourcing,
             "original_source": item.original_source,
@@ -46,27 +48,45 @@ def select_global_digest(analyses: list[GlobalAiAnalysisContract]) -> list[dict]
     return selected
 
 
+def _render_chain(item: dict) -> str:
+    groups = [
+        f"【{SECTOR_LABELS.get(entry['sector'], entry['sector'])}】" + "、".join(entry["companies"])
+        for entry in item.get("chain_mapping", [])
+        if entry.get("companies")
+    ]
+    parts = []
+    if groups:
+        parts.append(" | ".join(groups))
+    if item.get("transmission_path"):
+        parts.append(f"传导路径：{item['transmission_path']}")
+    return f"📍 涉及：{'；'.join(parts)}" if parts else ""
+
+
 def _render_item(item: dict) -> str:
     if item["sourcing"] == "FIRSTHAND_OFFICIAL":
         source_line = f"🔗 来源：{item['url']}"
     else:
-        source_line = f"🔗 转述报道：{item['url']}（原始出处：{item['original_source']}）"
-    return (
-        f"【{item['headline']}】\n"
-        f"{item['what_happened']}\n"
-        f"💡 分析：{item['analysis']}\n"
-        f"{source_line}"
-    )
+        source_line = f"🔗 来源：{item['url']}（转述报道，原始出处：{item['original_source']}）"
+    blocks = [
+        f"【{item['headline']}】",
+        item["what_happened"],
+        f"💡 分析：{item['analysis']}",
+    ]
+    chain = _render_chain(item)
+    if chain:
+        blocks.append(chain)
+    blocks.append(source_line)
+    return "\n\n".join(blocks)
 
 
 def render_global_digest(items: list[dict]) -> str:
     if not items:
-        return "AI产业链每日重点\n今日无达到标准的产业链重点新闻"
+        return "AI产业链每日重点\n\n今日无达到标准的产业链重点新闻"
     lines = ["AI产业链每日重点"]
     for sector, label in SECTOR_ORDER:
         rows = [item for item in items if item["sector"] == sector]
         if not rows:  # empty sectors are hidden, never padded
             continue
-        lines.append(f"\n═══ 【{label}】 ═══\n")
-        lines.append("\n\n".join(_render_item(item) for item in rows))
-    return "\n".join(lines)
+        lines.append(f"\n═══ 【{label}】 ═══")
+        lines.append("\n\n───\n\n".join(_render_item(item) for item in rows))
+    return "\n\n".join(lines)

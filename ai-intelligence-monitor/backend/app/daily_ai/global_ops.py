@@ -1,7 +1,13 @@
+import re
 from urllib.parse import urlsplit
 
-from app.daily_ai.global_contracts import GlobalAiAnalysisContract, GlobalOpsResult, quote_matches
-from app.daily_ai.global_digest import IMPORTANCE_THRESHOLD, SECTOR_CAP, TOTAL_LIMIT
+from app.daily_ai.global_contracts import (
+    IMPORTANCE_THRESHOLD,
+    GlobalAiAnalysisContract,
+    GlobalOpsResult,
+    quote_matches,
+)
+from app.daily_ai.global_digest import SECTOR_CAP, TOTAL_LIMIT
 from app.web_discovery.contracts import ClassifiedTier
 from app.web_discovery.source_policy import WebSourcePolicy, classify_url
 
@@ -10,10 +16,34 @@ def _contains_cjk(text: str) -> bool:
     return any("一" <= ch <= "鿿" for ch in text)
 
 
+# Pure judgement/advice words: banned unconditionally. Mapping a company onto a
+# supply-chain link is a fact and stays allowed; saying it benefits is not.
 PROHIBITED_ADVICE = (
-    "买入", "卖出", "目标价", "建议增持", "建议减持", "建仓", "涨停",
-    "price target", "buy rating", "sell rating", "should buy", "should sell",
+    "利好", "利空", "看好", "看空", "唱多", "唱空",
+    "建议关注", "值得关注", "可关注", "可布局", "布局机会", "建议买入", "建议卖出",
+    "建议增持", "建议减持", "目标价", "估值提升", "抄底", "加仓", "减仓", "持仓",
+    "涨停", "跌停", "股价", "股票代码", "受益股", "概念股炒作",
+    "price target", "buy rating", "sell rating", "overweight rating",
+    "should buy", "should sell", "bullish on", "bearish on",
 )
+
+# Direction words (上涨/下跌/涨幅/跌幅) are legitimate when they describe
+# product or commodity prices — PRICE_MOVE is a core materiality criterion
+# ("DRAM 合约价上涨20%" is a fact). They are prohibited only when aimed at
+# equities. These patterns catch that pairing in either order.
+_EQUITY_CONTEXT = r"(股价|股票|个股|市值|股市|A股|港股|美股|大盘|板块指数)"
+_DIRECTION = r"(上涨|下跌|涨幅|跌幅|走高|走低|大涨|大跌)"
+PROHIBITED_EQUITY_PATTERNS = (
+    re.compile(_EQUITY_CONTEXT + r"[^。；\n]{0,15}" + _DIRECTION),
+    re.compile(_DIRECTION + r"[^。；\n]{0,15}" + _EQUITY_CONTEXT),
+)
+
+
+def _violates_advice_rules(payload: str) -> bool:
+    lowered = payload.casefold()
+    if any(term.casefold() in lowered for term in PROHIBITED_ADVICE):
+        return True
+    return any(pattern.search(payload) for pattern in PROHIBITED_EQUITY_PATTERNS)
 
 
 def check_global_channel(
@@ -27,35 +57,46 @@ def check_global_channel(
     def evidence_tier_ok(url: str) -> bool:
         return classify_url(url, policy)[0] in {ClassifiedTier.T1, ClassifiedTier.T2}
 
+    def numeric_cited(item: GlobalAiAnalysisContract) -> bool:
+        return not item.contains_verifiable_numbers or any(
+            any(ch.isdigit() for ch in e.quote) for e in item.evidence
+        )
+
+    # Name the offenders so a failure is diagnosable without the raw artifact.
+    offenders = {
+        "numeric_claims_cited": [a.headline[:80] for a in analyses if not numeric_cited(a)],
+        "no_investment_advice": [
+            a.headline[:80] for a in analyses
+            if a.investment_advice or _violates_advice_rules(str(a.model_dump(mode="json")))
+        ],
+        "output_in_chinese": [
+            a.headline[:80] for a in analyses
+            if not (_contains_cjk(a.what_happened) and _contains_cjk(a.why_it_matters))
+        ],
+        "evidence_exact": [
+            a.headline[:80] for a in analyses
+            if not all(quote_matches(e.quote, raw_text_by_url.get(str(e.source_url), "")) for e in a.evidence)
+        ],
+    }
+
     sector_counts: dict[str, int] = {}
     for item in digest_items:
         sector_counts[item.get("sector", "?")] = sector_counts.get(item.get("sector", "?"), 0) + 1
     checks = {
         "total_limit": len(digest_items) <= TOTAL_LIMIT,
         "sector_cap": all(count <= SECTOR_CAP for count in sector_counts.values()),
-        # Papers have little chain-tracking value: at most one arXiv item.
         "arxiv_quota": sum((urlsplit(item.get("url", "")).hostname or "").endswith("arxiv.org") for item in digest_items) <= 1,
-        # Every published item names a concrete materiality criterion.
         "important_has_criterion": all(
             a.importance_criterion != "NONE" for a in analyses if a.importance_score >= IMPORTANCE_THRESHOLD
         ),
-        "evidence_exact": all(
-            all(quote_matches(e.quote, raw_text_by_url.get(str(e.source_url), "")) for e in a.evidence) for a in analyses
-        ),
+        "evidence_exact": not offenders["evidence_exact"],
         "evidence_tier": all(all(evidence_tier_ok(str(e.source_url)) for e in a.evidence) for a in analyses),
-        "numeric_claims_cited": all(
-            not a.contains_verifiable_numbers or any(any(ch.isdigit() for ch in e.quote) for e in a.evidence)
-            for a in analyses
+        "numeric_claims_cited": not offenders["numeric_claims_cited"],
+        "no_investment_advice": not offenders["no_investment_advice"],
+        "no_repeated_statement_published": all(
+            a.novelty != "REPEATED_STATEMENT" for a in analyses if a.importance_score >= IMPORTANCE_THRESHOLD
         ),
-        "no_investment_advice": all(
-            not a.investment_advice
-            and not any(term in str(a.model_dump(mode="json")).casefold() for term in (t.casefold() for t in PROHIBITED_ADVICE))
-            for a in analyses
-        ),
-        "no_repeated_statement_published": all(a.novelty != "REPEATED_STATEMENT" for a in analyses if a.importance_score >= IMPORTANCE_THRESHOLD),
         "region_basis_recorded": all(bool(a.region_basis.strip()) for a in analyses),
-        # FIRSTHAND_OFFICIAL is legal only when every evidence page is itself a
-        # T1 official domain; anything reached through media is SECONDHAND.
         "firsthand_tier_consistent": all(
             (a.sourcing == "FIRSTHAND_OFFICIAL")
             == all(classify_url(str(e.source_url), policy)[0] == ClassifiedTier.T1 for e in a.evidence)
@@ -64,13 +105,13 @@ def check_global_channel(
         "secondhand_origin_noted": all(
             a.sourcing != "SECONDHAND_REPORT" or bool(a.original_source.strip()) for a in analyses
         ),
-        # The reader-facing narrative must be Chinese (headline may be bilingual).
-        "output_in_chinese": all(_contains_cjk(a.what_happened) and _contains_cjk(a.why_it_matters) for a in analyses),
+        "output_in_chinese": not offenders["output_in_chinese"],
     }
     return GlobalOpsResult(
         passed=all(checks.values()),
         checks=checks,
         errors=[name for name, passed in checks.items() if not passed],
+        offenders={name: items for name, items in offenders.items() if items},
         stats={
             "analyses_accepted": len(analyses),
             "analyses_discarded_evidence_mismatch": discarded_evidence_failures,
