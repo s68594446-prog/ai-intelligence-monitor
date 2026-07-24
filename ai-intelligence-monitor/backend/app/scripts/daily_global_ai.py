@@ -24,7 +24,7 @@ from app.daily_ai.global_ops import check_global_channel
 from app.daily_ai.juhe import JuheAiBriefAdapter, JuheError, JuheHeadlinesAdapter
 from app.daily_ai.ops import check_a_share_channel
 from app.daily_ai.pdf import SafeOfficialPdfFetcher
-from app.daily_ai.quality import check_text_quality
+from app.daily_ai.quality import check_text_quality, is_market_action_headline
 from app.daily_ai.rss import RssDiscoveryAdapter, RssError
 from app.pipeline.errors import LLMAdapterTimeout, LLMOutputValidationError, LLMProviderError
 from app.scripts.daily_a_share_ai import KEYWORDS as A_SHARE_KEYWORDS
@@ -44,7 +44,7 @@ QUERY_PLAN_PATH = CONFIG_DIR / "cn_ai_queries.yaml"
 SOURCE_POLICY_PATH = CONFIG_DIR / "daily_ai_source_policy.yaml"
 RSS_SOURCES_PATH = CONFIG_DIR / "rss_sources.yaml"
 KEYWORDS_PATH = CONFIG_DIR / "industry_keywords.yaml"
-PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts/daily_global_ai_analysis_v5.txt"
+PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts/daily_global_ai_analysis_v6.txt"
 FETCH_MAX_BYTES = 5_000_000
 # A T1 page we cannot fetch (403 / access challenge) may still be reachable
 # through a T2 retelling of the SAME event cluster. That substitute is fetched
@@ -353,7 +353,12 @@ def run():
                             "why_it_matters": analysis.why_it_matters,
                             "transmission_path": analysis.transmission_path,
                         })
-                        if quality_reasons:
+                        market_term = is_market_action_headline(analysis.headline)
+                        if market_term:
+                            # Stock-quote story, not supply-chain news: dropped
+                            # before it can reach the digest or the advice check.
+                            analysis_failures.append({"url": candidate.canonical_url, "error_code": "OUT_OF_SCOPE_MARKET_ACTION", "diagnostics": {"matched_term": market_term, "headline": analysis.headline[:120]}})
+                        elif quality_reasons:
                             analysis_failures.append({"url": candidate.canonical_url, "error_code": "LOW_TEXT_QUALITY", "diagnostics": {"reasons": quality_reasons, "headline": analysis.headline[:120]}})
                         else:
                             analyses.append(analysis)

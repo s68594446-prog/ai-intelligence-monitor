@@ -1,3 +1,4 @@
+from app.daily_ai.dedup import cluster_texts
 from app.daily_ai.global_contracts import IMPORTANCE_THRESHOLD, GlobalAiAnalysisContract
 
 
@@ -42,13 +43,27 @@ def select_global_digest(
     ]
     # Same event reported by several sources: keep the most informative write-up
     # and carry the other outlets as supplementary sources, so one event never
-    # consumes two slots.
+    # consumes two slots. Discovery-stage clusters are merged with CJK-aware
+    # similarity over the model's own headlines, because the shared clustering
+    # cannot separate reworded Chinese titles.
     cluster_by_url = cluster_by_url or {}
+    headline_clusters = cluster_texts(
+        {str(item.evidence[0].source_url): f"{item.headline} {item.what_happened}" for item in eligible}
+    )
     survivors: dict[str, GlobalAiAnalysisContract] = {}
     extra_sources: dict[str, list[str]] = {}
+    seen_keys: dict[str, str] = {}
     for item in eligible:
         url = str(item.evidence[0].source_url)
-        key = cluster_by_url.get(url) or f"url:{url}"
+        # Either signal merging two items is enough; the first key wins so both
+        # signals converge on one bucket.
+        candidate_keys = [cluster_by_url.get(url), headline_clusters.get(url)]
+        key = next((seen_keys[k] for k in candidate_keys if k and k in seen_keys), None)
+        if key is None:
+            key = next((k for k in candidate_keys if k), f"url:{url}")
+        for signal in candidate_keys:
+            if signal:
+                seen_keys[signal] = key
         current = survivors.get(key)
         if current is None:
             survivors[key] = item
@@ -84,9 +99,9 @@ def select_global_digest(
 
 def _render_chain(item: dict) -> str:
     groups = [
-        f"【{SECTOR_LABELS.get(entry['sector'], entry['sector'])}】" + "、".join(entry["companies"])
+        f"【{SECTOR_LABELS.get(entry['sector'], entry['sector'])}】"
+        + ("、".join(entry["companies"]) if entry.get("companies") else "无明确对应上市公司")
         for entry in item.get("chain_mapping", [])
-        if entry.get("companies")
     ]
     parts = []
     if groups:

@@ -25,6 +25,7 @@ _PUNCT_EQUIVALENTS = {
     "，": ",", "．": ".", "：": ":", "；": ";",  # full-width
     "？": "?", "！": "!", "（": "(", "）": ")",
     "％": "%", "…": "...", "・": "-",
+    "。": ".", "、": ",",                          # CJK sentence punctuation
 }
 _PUNCT_TABLE = str.maketrans(_PUNCT_EQUIVALENTS)
 # Layout whitespace sitting next to punctuation ("Claude Haiku ," vs
@@ -105,7 +106,9 @@ class ChainMapEntry(StrictModel):
     """
 
     sector: "Sector"
-    companies: list[str] = Field(min_length=1, max_length=8)
+    # Empty is legal and honest: some news touches a link without any specific
+    # listed company on it. Forcing a name would invite invention.
+    companies: list[str] = Field(default_factory=list, max_length=8)
 
 
 class GlobalAiAnalysisContract(StrictModel):

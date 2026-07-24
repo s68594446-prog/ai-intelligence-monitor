@@ -26,6 +26,25 @@ def _token_repetition_ratio(text: str) -> float:
     return max(counts.values()) / len(grams)
 
 
+# Market-action vocabulary. An item whose HEADLINE leads with these is a
+# stock-quote story, not supply-chain news, and is dropped before it can reach
+# the digest or trip the advice check. The same words inside the body are not
+# grounds for dropping — the model may legitimately describe context.
+MARKET_ACTION_TERMS = (
+    "逆势反弹", "涨停", "跌停", "大涨", "大跌", "暴涨", "暴跌", "板块异动",
+    "集体走强", "集体走弱", "领涨", "领跌", "主力资金", "北向资金", "换手率",
+    "成交额", "股价上涨", "股价下跌", "市值蒸发", "创新高", "创新低",
+    "stocks rally", "stocks slump", "shares jump", "shares plunge",
+    "stock surge", "market rally", "selloff",
+)
+
+
+def is_market_action_headline(headline: str) -> str | None:
+    """Return the matched market-action term when the headline is a quote story."""
+    lowered = headline.casefold()
+    return next((term for term in MARKET_ACTION_TERMS if term.casefold() in lowered), None)
+
+
 def check_text_quality(fields: dict[str, str]) -> list[str]:
     """Return reason codes for unusable narrative text; empty means acceptable."""
     reasons: list[str] = []
