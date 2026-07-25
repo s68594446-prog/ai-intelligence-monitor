@@ -44,7 +44,7 @@ QUERY_PLAN_PATH = CONFIG_DIR / "cn_ai_queries.yaml"
 SOURCE_POLICY_PATH = CONFIG_DIR / "daily_ai_source_policy.yaml"
 RSS_SOURCES_PATH = CONFIG_DIR / "rss_sources.yaml"
 KEYWORDS_PATH = CONFIG_DIR / "industry_keywords.yaml"
-PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts/daily_global_ai_analysis_v6.txt"
+PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts/daily_global_ai_analysis_v7.txt"
 FETCH_MAX_BYTES = 5_000_000
 # A T1 page we cannot fetch (403 / access challenge) may still be reachable
 # through a T2 retelling of the SAME event cluster. That substitute is fetched

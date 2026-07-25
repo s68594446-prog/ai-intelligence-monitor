@@ -31,11 +31,21 @@ def _token_repetition_ratio(text: str) -> float:
 # the digest or trip the advice check. The same words inside the body are not
 # grounds for dropping — the model may legitimately describe context.
 MARKET_ACTION_TERMS = (
+    # price/index action
     "逆势反弹", "涨停", "跌停", "大涨", "大跌", "暴涨", "暴跌", "板块异动",
     "集体走强", "集体走弱", "领涨", "领跌", "主力资金", "北向资金", "换手率",
     "成交额", "股价上涨", "股价下跌", "市值蒸发", "创新高", "创新低",
     "stocks rally", "stocks slump", "shares jump", "shares plunge",
     "stock surge", "market rally", "selloff",
+    # broker research, ratings and position advice
+    "券商", "研报", "评级", "目标价", "调仓", "加仓", "减仓", "配置建议",
+    "投资策略", "投资建议", "金股", "首次覆盖", "上调评级", "下调评级",
+    "买入评级", "卖出评级", "增持评级", "减持评级", "看多", "看空", "唱多", "唱空",
+    "analyst rating", "price target", "upgrades to buy", "downgrades to",
+    "initiates coverage", "overweight", "underweight",
+    # investment-banking process gossip
+    "承销商", "保荐机构", "保荐人", "承销团", "路演", "询价",
+    "underwriter", "bookrunner", "lead manager",
 )
 
 

@@ -31,6 +31,12 @@ _PUNCT_TABLE = str.maketrans(_PUNCT_EQUIVALENTS)
 # Layout whitespace sitting next to punctuation ("Claude Haiku ," vs
 # "Claude Haiku,") is a rendering artifact of HTML extraction, not content.
 _SPACE_AROUND_PUNCT = re.compile(r"\s*([,.;:!?()\"'%-])\s*")
+# Whitespace on the boundary between a CJK character and a Latin/digit run
+# ("拥有 Fable" vs "拥有Fable") is presentational: Chinese is not space-delimited,
+# so a space touching a CJK char never separates two meaningful tokens. Spaces
+# between two non-CJK tokens ("Fable 5") are left intact.
+_CJK = "一-鿿㐀-䶿豈-﫿"
+_CJK_BOUNDARY_SPACE = re.compile(f"(?<=[{_CJK}])\\s+|\\s+(?=[{_CJK}])")
 
 
 def normalize_ws(text: str) -> str:
@@ -42,6 +48,7 @@ def normalize_for_match(text: str) -> str:
     """Normalize punctuation presentation and layout whitespace only."""
     folded = text.translate(_PUNCT_TABLE)
     folded = _SPACE_AROUND_PUNCT.sub(r"\1", folded)
+    folded = _CJK_BOUNDARY_SPACE.sub("", folded)
     return normalize_ws(folded)
 
 
@@ -168,4 +175,8 @@ class GlobalOpsResult(StrictModel):
     # Failing item headlines per check, so a failure is diagnosable from the
     # committed digest without opening the run artifact.
     offenders: dict[str, list[str]] = Field(default_factory=dict)
+    # Same findings for analyses that were never published (filtered, deduped,
+    # or below threshold). Informational only — they gate nothing, but they are
+    # recorded rather than dropped.
+    unpublished_findings: dict[str, list[str]] = Field(default_factory=dict)
     stats: dict[str, int] = Field(default_factory=dict)

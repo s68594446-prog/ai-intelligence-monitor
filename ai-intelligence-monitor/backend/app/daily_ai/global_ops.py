@@ -17,6 +17,26 @@ def _contains_cjk(text: str) -> bool:
 
 
 CHINESE_NUMERALS = set("〇零一二两三四五六七八九十百千万亿兆")
+# Quantities are not always ASCII digits: Chinese numerals ("数千万种子轮") and
+# English number words ("up to two gigawatts") carry them too. A quote using
+# any of these forms does cite its number.
+ENGLISH_NUMBER_WORDS = (
+    "zero", "one", "two", "three", "four", "five", "six", "seven", "eight",
+    "nine", "ten", "eleven", "twelve", "dozen", "twenty", "thirty", "forty",
+    "fifty", "sixty", "seventy", "eighty", "ninety", "hundred", "thousand",
+    "million", "billion", "trillion", "half", "double", "triple", "quarter",
+)
+_ENGLISH_NUMBER_RE = re.compile(r"\b(" + "|".join(ENGLISH_NUMBER_WORDS) + r")\b", re.IGNORECASE)
+# Numbers as they appear in narrative prose, for diagnostics.
+NUMBER_IN_PROSE = re.compile(
+    r"\d+(?:[.,]\d+)?\s*(?:%|percent|[A-Za-z]{1,3}\b)?|[〇零一二两三四五六七八九十百千万亿兆]+"
+)
+
+
+def quote_carries_number(quote: str) -> bool:
+    if any(ch.isdigit() or ch in CHINESE_NUMERALS for ch in quote):
+        return True
+    return bool(_ENGLISH_NUMBER_RE.search(quote))
 
 
 # Pure judgement/advice words: banned unconditionally. Mapping a company onto a
@@ -81,28 +101,44 @@ def check_global_channel(
         return classify_url(url, policy)[0] in {ClassifiedTier.T1, ClassifiedTier.T2}
 
     def numeric_cited(item: GlobalAiAnalysisContract) -> bool:
-        # Chinese numerals carry quantities without ASCII digits ("数千万种子轮"),
-        # so a quote using them still counts as citing the number.
-        return not item.contains_verifiable_numbers or any(
-            any(ch.isdigit() or ch in CHINESE_NUMERALS for ch in e.quote) for e in item.evidence
+        return not item.contains_verifiable_numbers or any(quote_carries_number(e.quote) for e in item.evidence)
+
+    def numeric_diagnosis(item: GlobalAiAnalysisContract) -> str:
+        """Name the claimed numbers and the quotes, so the cause is visible."""
+        claimed = NUMBER_IN_PROSE.findall(f"{item.what_happened} {item.why_it_matters}")
+        quotes = " ｜ ".join(e.quote[:60] for e in item.evidence)
+        return (
+            f"{item.headline[:60]} → 声称数字：{'/'.join(claimed[:5]) or '(正文未见数字)'}"
+            f" → 实际quote：{quotes[:160] or '(无)'}"
         )
 
-    # Name the offenders so a failure is diagnosable without the raw artifact.
-    offenders = {
-        "numeric_claims_cited": [a.headline[:80] for a in analyses if not numeric_cited(a)],
-        "no_investment_advice": [
-            f"{a.headline[:70]} → 命中：{'/'.join(advice_violations(a))}"
-            for a in analyses if advice_violations(a)
-        ],
-        "output_in_chinese": [
-            a.headline[:80] for a in analyses
-            if not (_contains_cjk(a.what_happened) and _contains_cjk(a.why_it_matters))
-        ],
-        "evidence_exact": [
-            a.headline[:80] for a in analyses
-            if not all(quote_matches(e.quote, raw_text_by_url.get(str(e.source_url), "")) for e in a.evidence)
-        ],
-    }
+    # Reader-facing rules gate on what actually reaches the reader. An analysis
+    # that was filtered or deduped out is never published, so it cannot violate
+    # a reader-facing rule — but its findings are still reported below rather
+    # than hidden. Evidence exactness applies to every analysis we produced.
+    published_urls = {item.get("url") for item in digest_items}
+    published = [a for a in analyses if str(a.evidence[0].source_url) in published_urls] if digest_items else []
+    unpublished = [a for a in analyses if a not in published]
+
+    def reader_findings(items: list[GlobalAiAnalysisContract]) -> dict[str, list[str]]:
+        return {
+            "numeric_claims_cited": [numeric_diagnosis(a) for a in items if not numeric_cited(a)],
+            "no_investment_advice": [
+                f"{a.headline[:70]} → 命中：{'/'.join(advice_violations(a))}"
+                for a in items if advice_violations(a)
+            ],
+            "output_in_chinese": [
+                a.headline[:80] for a in items
+                if not (_contains_cjk(a.what_happened) and _contains_cjk(a.why_it_matters))
+            ],
+        }
+
+    offenders = reader_findings(published)
+    offenders["evidence_exact"] = [
+        a.headline[:80] for a in analyses
+        if not all(quote_matches(e.quote, raw_text_by_url.get(str(e.source_url), "")) for e in a.evidence)
+    ]
+    unpublished_findings = {name: items for name, items in reader_findings(unpublished).items() if items}
 
     sector_counts: dict[str, int] = {}
     for item in digest_items:
@@ -134,6 +170,7 @@ def check_global_channel(
     }
     return GlobalOpsResult(
         passed=all(checks.values()),
+        unpublished_findings=unpublished_findings,
         checks=checks,
         errors=[name for name, passed in checks.items() if not passed],
         offenders={name: items for name, items in offenders.items() if items},
