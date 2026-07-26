@@ -60,7 +60,7 @@ def load_industry_keywords() -> list[str]:
 # Board-balancing is a fetch-budget concern only; the final GLOBAL/CHINA
 # section of each item is still decided by the analysis contract from the
 # event's actors, never by the article's origin.
-CHINA_FETCH_SHARE = 0.4
+CHINA_FETCH_SHARE = 0.5
 ARXIV_FETCH_CAP = 3
 CN_BOARD_DOMAINS = {
     "36kr.com", "qbitai.com", "jiqizhixin.com", "leiphone.com", "caixin.com",

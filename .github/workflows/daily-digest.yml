@@ -86,3 +86,28 @@ jobs:
           git commit -m "digest: ${DAY}" || { echo "nothing to commit"; exit 0; }
           git pull --rebase origin main
           git push origin main
+      - name: Email the digest (Gate-checked; sends only if Ops passed)
+        working-directory: ai-intelligence-monitor/backend
+        env:
+          EMAIL_DELIVERY_ENABLED: "true"
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_SECURITY: STARTTLS
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
+          SMTP_TO: ${{ secrets.SMTP_TO }}
+        # Exit 2 = Gate blocked (e.g. Ops not passed): a normal, non-failing
+        # outcome for the workflow, so a blocked send never marks the run red.
+        run: python -m app.scripts.send_digest_email --send || [ $? -eq 2 ]
+      - name: Commit email ledger
+        run: |
+          if [ -z "$(git status --porcelain digests/.email-log.jsonl)" ]; then
+            echo "no ledger change"; exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add digests/.email-log.jsonl
+          git commit -m "email: send ledger update"
+          git pull --rebase origin main
+          git push origin main

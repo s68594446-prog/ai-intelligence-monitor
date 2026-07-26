@@ -34,6 +34,16 @@ feeds:
   - {name: kr36, url: 'https://36kr.com/feed', max_items: 10, prefilter: true}
   - {name: leiphone, url: 'https://www.leiphone.com/feed', max_items: 8, prefilter: true}
   - {name: infoq_cn, url: 'https://www.infoq.cn/feed', max_items: 5, prefilter: true}
+  # Chinese hardware/industry coverage added 2026-07-26 (probe-verified 200 +
+  # valid feed). General-topic feeds, so prefilter:true — the bilingual keyword
+  # list already carries the CN supply-chain company names (寒武纪/长鑫/中际旭创/
+  # 北方华创/中微/通富微电 …) that surface hardware items. Probed and excluded
+  # (no valid feed from the runner): 财联社(405), 爱集微(non-feed), 东方财富,
+  # 同花顺, 集微网/半导体行业观察/EET-China (timeout/404).
+  - {name: jiemian_tech, url: 'https://a.jiemian.com/index.php?m=article&a=rss', max_items: 12, prefilter: true}
+  - {name: tmtpost, url: 'https://www.tmtpost.com/feed', max_items: 10, prefilter: true}
+  - {name: ithome, url: 'https://www.ithome.com/rss/', max_items: 15, prefilter: true}
+  - {name: sina_tech, url: 'https://rss.sina.com.cn/tech/rollnews.xml', max_items: 12, prefilter: true}
   # --- demand-side signals, retained at reduced quota (T1/T2/T3) ---
   - {name: openai, url: 'https://openai.com/news/rss.xml', max_items: 5, prefilter: false}
   - {name: google_ai, url: 'https://blog.google/technology/ai/rss/', max_items: 5, prefilter: false}

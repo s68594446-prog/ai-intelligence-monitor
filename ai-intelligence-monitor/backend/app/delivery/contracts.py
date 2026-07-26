@@ -17,6 +17,7 @@ class EmailDeliveryRequest(BaseModel):
 
     run_id: str
     from_address: str
+    from_display_name: str = ""
     to_addresses: tuple[str, ...]
     subject: str
     html_body: str

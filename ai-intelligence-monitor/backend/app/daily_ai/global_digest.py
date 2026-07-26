@@ -7,6 +7,19 @@ from app.daily_ai.global_contracts import IMPORTANCE_THRESHOLD, GlobalAiAnalysis
 SECTOR_CAP = 5
 TOTAL_LIMIT = 20
 
+# China supply-chain floor: reserve up to this many slots for qualifying
+# Chinese hardware items so foreign news cannot crowd them out on score alone.
+# The floor is only filled when that many genuinely qualify — never padded.
+CHINA_HARDWARE_FLOOR = 3
+HARDWARE_SECTORS = {
+    "CHIPS_COMPUTE", "MEMORY_STORAGE", "PACKAGING_EQUIPMENT",
+    "NETWORKING_OPTICS", "INFRASTRUCTURE",
+}
+
+
+def is_china_hardware(item: GlobalAiAnalysisContract) -> bool:
+    return item.region_section == "CHINA" and item.sector in HARDWARE_SECTORS
+
 SECTOR_ORDER = [
     ("CHIPS_COMPUTE", "芯片与算力"),
     ("MEMORY_STORAGE", "存储"),
@@ -75,9 +88,16 @@ def select_global_digest(
         extra_sources[key].append(loser_url)
 
     ordered = sorted(survivors.items(), key=lambda pair: (-pair[1].importance_score, pair[1].headline))
+    # Pass 1 reserves the China-hardware floor (highest-scoring first); pass 2
+    # fills the rest by score. Both honour sector caps and the total limit, so
+    # the floor guarantees inclusion when supply exists without ever padding.
+    china_floor = [pair for pair in ordered if is_china_hardware(pair[1])][:CHINA_HARDWARE_FLOOR]
+    floor_keys = {key for key, _ in china_floor}
+    selection_order = china_floor + [pair for pair in ordered if pair[0] not in floor_keys]
+
     selected: list[dict] = []
     sector_counts: dict[str, int] = {}
-    for key, item in ordered:
+    for key, item in selection_order:
         if len(selected) >= TOTAL_LIMIT or sector_counts.get(item.sector, 0) >= SECTOR_CAP:
             continue
         sector_counts[item.sector] = sector_counts.get(item.sector, 0) + 1
@@ -94,6 +114,8 @@ def select_global_digest(
             "sourcing": item.sourcing,
             "original_source": item.original_source,
         })
+    # Preserve sector grouping order in the rendered output regardless of the
+    # two-pass selection order.
     return selected
 
 

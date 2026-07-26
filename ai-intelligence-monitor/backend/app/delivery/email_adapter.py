@@ -3,6 +3,7 @@ import smtplib
 import ssl
 from dataclasses import dataclass
 from email.message import EmailMessage
+from email.utils import formataddr
 from typing import Protocol
 
 from pydantic import SecretStr
@@ -113,12 +114,13 @@ class SMTPEmailDeliveryAdapter:
 
     @staticmethod
     def build_message(request: EmailDeliveryRequest) -> EmailMessage:
-        for value in (request.subject, request.from_address, request.message_id, *request.to_addresses):
+        for value in (request.subject, request.from_address, request.from_display_name, request.message_id, *request.to_addresses):
             if _has_header_break(value):
                 raise EmailProviderError("EMAIL_HEADER_INVALID")
         message = EmailMessage()
         message["Subject"] = request.subject
-        message["From"] = request.from_address
+        # Display name is cosmetic; the envelope still uses the bare address.
+        message["From"] = formataddr((request.from_display_name, request.from_address)) if request.from_display_name else request.from_address
         message["To"] = "undisclosed-recipients:;"
         message["Message-ID"] = request.message_id
         message.set_content(request.text_body)

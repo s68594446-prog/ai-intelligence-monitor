@@ -79,8 +79,11 @@ def evaluate_digest(path: Path) -> DigestGateResult:
     return DigestGateResult(not reasons, reasons, path.stem, body, bool(ops))
 
 
+FROM_DISPLAY_NAME = "AI Supply Chain Daily"
+
+
 def build_subject(day: str) -> str:
-    return f"AI产业链每日重点｜{day}"
+    return f"AI Supply Chain Daily｜{day}"
 
 
 def render_bodies(day: str, body: str) -> tuple[str, str]:
@@ -157,6 +160,7 @@ def build_request(settings: Settings, day: str, body: str) -> tuple[EmailDeliver
     request = EmailDeliveryRequest(
         run_id=f"digest-{day}",
         from_address=configuration.from_address,
+        from_display_name=FROM_DISPLAY_NAME,
         to_addresses=configuration.recipients,
         subject=build_subject(day),
         html_body=html_body,
