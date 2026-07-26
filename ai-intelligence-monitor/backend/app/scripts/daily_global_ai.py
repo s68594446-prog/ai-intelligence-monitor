@@ -20,11 +20,11 @@ from app.daily_ai.global_analysis import (
     ProviderCallError,
 )
 from app.daily_ai.global_digest import render_global_digest, select_global_digest
-from app.daily_ai.global_ops import check_global_channel
+from app.daily_ai.global_ops import advice_violations, check_global_channel
 from app.daily_ai.juhe import JuheAiBriefAdapter, JuheError, JuheHeadlinesAdapter
 from app.daily_ai.ops import check_a_share_channel
 from app.daily_ai.pdf import SafeOfficialPdfFetcher
-from app.daily_ai.quality import check_text_quality, is_market_action_headline
+from app.daily_ai.quality import check_text_quality, out_of_scope_headline
 from app.daily_ai.rss import RssDiscoveryAdapter, RssError
 from app.pipeline.errors import LLMAdapterTimeout, LLMOutputValidationError, LLMProviderError
 from app.scripts.daily_a_share_ai import KEYWORDS as A_SHARE_KEYWORDS
@@ -264,9 +264,21 @@ def run():
         published = published_by_url.get(item.canonical_url)
         return published is None or published >= cutoff
 
+    # Source-level OUT_OF_SCOPE exclusion: stock-quote and broker/banking news
+    # is dropped by its discovery title BEFORE fetch and analysis, so it never
+    # enters the pipeline, never spends budget, and never becomes an offender.
+    out_of_scope = []
+    def in_scope(item) -> bool:
+        term = out_of_scope_headline(item.title)
+        if term:
+            out_of_scope.append({"title": item.title[:120], "matched_term": term, "url": item.canonical_url})
+            return False
+        return True
+
     candidates = [
         item for item in normalized
-        if item.source_tier in {ClassifiedTier.T1, ClassifiedTier.T2} and passes_prefilter(item) and is_fresh(item)
+        if item.source_tier in {ClassifiedTier.T1, ClassifiedTier.T2}
+        and passes_prefilter(item) and is_fresh(item) and in_scope(item)
     ]
     stale_dropped = sum(
         1 for item in normalized
@@ -290,6 +302,7 @@ def run():
         "run_id": run_id, "pages": [p.model_dump(mode="json") for p in pages],
         "discovery_status": discovery_status,
         "normalized_count": len(normalized), "eligible_t1_t2": len(candidates),
+        "out_of_scope_excluded": out_of_scope,
         "event_clusters": clusters,
         "tier_counts": {tier.value: sum(item.source_tier == tier for item in normalized) for tier in ClassifiedTier},
     })
@@ -353,11 +366,15 @@ def run():
                             "why_it_matters": analysis.why_it_matters,
                             "transmission_path": analysis.transmission_path,
                         })
-                        market_term = is_market_action_headline(analysis.headline)
-                        if market_term:
-                            # Stock-quote story, not supply-chain news: dropped
-                            # before it can reach the digest or the advice check.
-                            analysis_failures.append({"url": candidate.canonical_url, "error_code": "OUT_OF_SCOPE_MARKET_ACTION", "diagnostics": {"matched_term": market_term, "headline": analysis.headline[:120]}})
+                        # Belt-and-suspenders: the model can rewrite an in-scope
+                        # source title into a broker/quote headline. If it does,
+                        # discard so the item never reaches the digest or ops.
+                        scope_term = out_of_scope_headline(analysis.headline)
+                        advice_terms = advice_violations(analysis)
+                        if scope_term:
+                            analysis_failures.append({"url": candidate.canonical_url, "error_code": "OUT_OF_SCOPE_MARKET_ACTION", "diagnostics": {"matched_term": scope_term, "headline": analysis.headline[:120]}})
+                        elif advice_terms:
+                            analysis_failures.append({"url": candidate.canonical_url, "error_code": "DISCIPLINE_ADVICE", "diagnostics": {"matched_terms": advice_terms, "headline": analysis.headline[:120]}})
                         elif quality_reasons:
                             analysis_failures.append({"url": candidate.canonical_url, "error_code": "LOW_TEXT_QUALITY", "diagnostics": {"reasons": quality_reasons, "headline": analysis.headline[:120]}})
                         else:

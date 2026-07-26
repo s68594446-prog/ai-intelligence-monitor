@@ -120,25 +120,30 @@ def check_global_channel(
     published = [a for a in analyses if str(a.evidence[0].source_url) in published_urls] if digest_items else []
     unpublished = [a for a in analyses if a not in published]
 
-    def reader_findings(items: list[GlobalAiAnalysisContract]) -> dict[str, list[str]]:
+    # Presentation-quality checks (Chinese output, numeric citation) gate only
+    # on what the reader sees; findings on unpublished items are recorded but
+    # do not block. no_investment_advice is a COMPLIANCE red line — the system
+    # must not PRODUCE advice at all — so it gates on every analysis, published
+    # or not, with no backdoor. evidence_exact likewise applies to all.
+    def presentation_findings(items: list[GlobalAiAnalysisContract]) -> dict[str, list[str]]:
         return {
             "numeric_claims_cited": [numeric_diagnosis(a) for a in items if not numeric_cited(a)],
-            "no_investment_advice": [
-                f"{a.headline[:70]} → 命中：{'/'.join(advice_violations(a))}"
-                for a in items if advice_violations(a)
-            ],
             "output_in_chinese": [
                 a.headline[:80] for a in items
                 if not (_contains_cjk(a.what_happened) and _contains_cjk(a.why_it_matters))
             ],
         }
 
-    offenders = reader_findings(published)
+    offenders = presentation_findings(published)
+    offenders["no_investment_advice"] = [
+        f"{a.headline[:70]} → 命中：{'/'.join(advice_violations(a))}"
+        for a in analyses if advice_violations(a)
+    ]
     offenders["evidence_exact"] = [
         a.headline[:80] for a in analyses
         if not all(quote_matches(e.quote, raw_text_by_url.get(str(e.source_url), "")) for e in a.evidence)
     ]
-    unpublished_findings = {name: items for name, items in reader_findings(unpublished).items() if items}
+    unpublished_findings = {name: items for name, items in presentation_findings(unpublished).items() if items}
 
     sector_counts: dict[str, int] = {}
     for item in digest_items:
