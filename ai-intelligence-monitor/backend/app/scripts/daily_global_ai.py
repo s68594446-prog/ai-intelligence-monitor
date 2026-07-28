@@ -20,7 +20,7 @@ from app.daily_ai.global_analysis import (
     ProviderCallError,
 )
 from app.daily_ai.global_digest import render_global_digest, select_global_digest
-from app.daily_ai.global_ops import advice_violations, check_global_channel
+from app.daily_ai.global_ops import advice_violations, check_global_channel, numeric_claim_cited
 from app.daily_ai.juhe import JuheAiBriefAdapter, JuheError, JuheHeadlinesAdapter
 from app.daily_ai.ops import check_a_share_channel
 from app.daily_ai.pdf import SafeOfficialPdfFetcher
@@ -377,6 +377,13 @@ def run():
                             analysis_failures.append({"url": candidate.canonical_url, "error_code": "DISCIPLINE_ADVICE", "diagnostics": {"matched_terms": advice_terms, "headline": analysis.headline[:120]}})
                         elif quality_reasons:
                             analysis_failures.append({"url": candidate.canonical_url, "error_code": "LOW_TEXT_QUALITY", "diagnostics": {"reasons": quality_reasons, "headline": analysis.headline[:120]}})
+                        # A number claimed without a quote that carries it is a
+                        # single-item defect: drop this item with an audit record
+                        # and keep the rest of the digest. Enforced here (not only
+                        # in ops) because the ops check is a whole-digest boolean,
+                        # so one offender used to block the entire email.
+                        elif not numeric_claim_cited(analysis):
+                            analysis_failures.append({"url": candidate.canonical_url, "error_code": "NUMERIC_CLAIM_UNCITED", "diagnostics": {"headline": analysis.headline[:120], "quotes": [e.quote[:160] for e in analysis.evidence]}})
                         else:
                             analyses.append(analysis)
                             analysis_urls[str(analysis.evidence[0].source_url)] = candidate.candidate_id

@@ -25,18 +25,54 @@ ENGLISH_NUMBER_WORDS = (
     "nine", "ten", "eleven", "twelve", "dozen", "twenty", "thirty", "forty",
     "fifty", "sixty", "seventy", "eighty", "ninety", "hundred", "thousand",
     "million", "billion", "trillion", "half", "double", "triple", "quarter",
+    # Multiplicative adverbs/adjectives carry a quantity just as "double" does.
+    # Their absence made "delivery times ... to as much as twice their previous
+    # levels" read as an uncited number and blocked a whole digest (2026-07-28).
+    "twice", "thrice", "twofold", "threefold", "fourfold", "fivefold", "tenfold",
 )
+# \b on both sides: "twicelike"/"tenfoldish" must not match.
 _ENGLISH_NUMBER_RE = re.compile(r"\b(" + "|".join(ENGLISH_NUMBER_WORDS) + r")\b", re.IGNORECASE)
-# Numbers as they appear in narrative prose, for diagnostics.
+
+# Numbers as they appear in narrative prose, for diagnostics ONLY (never for
+# pass/fail). CJK has no word boundaries, so a bare numeral class also matches
+# the 三 in 三星 (Samsung) and the 一 in 进一步 — which made the diagnostic
+# claim a digest asserted numbers it never asserted. Strip those first.
 NUMBER_IN_PROSE = re.compile(
     r"\d+(?:[.,]\d+)?\s*(?:%|percent|[A-Za-z]{1,3}\b)?|[〇零一二两三四五六七八九十百千万亿兆]+"
 )
+# Proper nouns and fixed expressions whose CJK numeral is not a quantity.
+# Deliberately a short, literal list — this only cleans up a human-facing
+# string, so it needs to stop the common noise, not to be exhaustive.
+_CJK_NUMERAL_NOISE = (
+    "三星", "统一", "第一", "一系列", "进一步", "一体", "一致", "一定", "一般",
+    "一直", "一些", "一样", "一起", "一方面", "唯一", "十分", "百度", "万科",
+)
+
+
+def numbers_claimed_in_prose(text: str) -> list[str]:
+    """Numeric claims a reader would see, with proper-noun/idiom noise removed."""
+    for phrase in _CJK_NUMERAL_NOISE:
+        text = text.replace(phrase, "　")
+    return NUMBER_IN_PROSE.findall(text)
 
 
 def quote_carries_number(quote: str) -> bool:
     if any(ch.isdigit() or ch in CHINESE_NUMERALS for ch in quote):
         return True
     return bool(_ENGLISH_NUMBER_RE.search(quote))
+
+
+def numeric_claim_cited(item: GlobalAiAnalysisContract) -> bool:
+    """An item claiming verifiable numbers must have a quote that carries one.
+
+    THE single definition of this rule. The analysis stage calls it to discard
+    the offending item fail-soft (discipline: one bad article is dropped with an
+    audit record, it never takes the run or the digest down with it); ops calls
+    it again as a backstop. Keep it here so the two can never drift apart.
+    """
+    return not item.contains_verifiable_numbers or any(
+        quote_carries_number(e.quote) for e in item.evidence
+    )
 
 
 # Pure judgement/advice words: banned unconditionally. Mapping a company onto a
@@ -100,12 +136,13 @@ def check_global_channel(
     def evidence_tier_ok(url: str) -> bool:
         return classify_url(url, policy)[0] in {ClassifiedTier.T1, ClassifiedTier.T2}
 
-    def numeric_cited(item: GlobalAiAnalysisContract) -> bool:
-        return not item.contains_verifiable_numbers or any(quote_carries_number(e.quote) for e in item.evidence)
+    # Backstop only: the analysis stage already discards offenders one by one.
+    # Shared definition — see numeric_claim_cited.
+    numeric_cited = numeric_claim_cited
 
     def numeric_diagnosis(item: GlobalAiAnalysisContract) -> str:
         """Name the claimed numbers and the quotes, so the cause is visible."""
-        claimed = NUMBER_IN_PROSE.findall(f"{item.what_happened} {item.why_it_matters}")
+        claimed = numbers_claimed_in_prose(f"{item.what_happened} {item.why_it_matters}")
         quotes = " ｜ ".join(e.quote[:60] for e in item.evidence)
         return (
             f"{item.headline[:60]} → 声称数字：{'/'.join(claimed[:5]) or '(正文未见数字)'}"
