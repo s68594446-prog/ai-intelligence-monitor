@@ -2,8 +2,13 @@ name: daily-digest
 
 on:
   schedule:
-    - cron: "0 0 * * *" # 00:00 UTC = 08:00 Asia/Shanghai
+    - cron: "30 22 * * *" # 22:30 UTC = 北京时间每天 6:30 (Asia/Shanghai, 次日)
   workflow_dispatch:
+    inputs:
+      force:
+        description: "Bypass the same-day idempotency guard (regenerate, OVERWRITE the archive, and RE-SEND). Default false."
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -21,12 +26,95 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+      # Idempotency guard: runs BEFORE install/discovery/DeepSeek. If today's
+      # Asia/Shanghai digest is already delivered (a committed ledger record with
+      # day == today AND status == SENT), skip the whole pipeline so a second
+      # same-day run cannot overwrite the archive or send a second email.
+      #
+      # Judged DAY-level (independent of digest content), unlike the send
+      # script's content-keyed idempotency in email_digest.py — that is exactly
+      # why 2026-07-27's two runs each sent a mail; this closes that.
+      #
+      # KNOWN EDGES (intentionally NOT handled this round):
+      #  * Race: two overlapping runs can both read the ledger before either has
+      #    committed its SENT record, so both proceed and double-send. No lock is
+      #    added by request; documented here as accepted.
+      #  * Digest file exists but has no SENT record (a prior send failed): the
+      #    guard sees no SENT and proceeds to regenerate/overwrite/re-send. This
+      #    is accepted for now — we would rather re-send than silently drop a day.
+      #
+      # fail-soft: if the ledger cannot be read/parsed, we DO NOT skip — we
+      # proceed (rather re-send than lose a real day) and mark a red ::warning::;
+      # a skip only ever happens on a positive, parsed SENT hit.
+      - name: Idempotency guard (skip if today already delivered)
+        id: guard
+        shell: bash
+        run: |
+          set -o pipefail
+          set +e   # we branch on the guard's decision, not on exit status
+          DAY=$(TZ=Asia/Shanghai date +%F)
+          echo "day=$DAY" >> "$GITHUB_OUTPUT"
+          FORCE="${{ github.event.inputs.force }}"   # empty on schedule => not forced
+          if [ "$FORCE" = "true" ]; then
+            echo "FORCE=true: bypassing idempotency guard; full pipeline will run (may OVERWRITE archive and RE-SEND)."
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          LEDGER="digests/.email-log.jsonl"
+          DECISION=$(GUARD_DAY="$DAY" python3 - "$LEDGER" <<'PY'
+          import json, os, sys
+          day = os.environ["GUARD_DAY"]
+          path = sys.argv[1]
+          def log(msg): print(msg, file=sys.stderr)
+          try:
+              with open(path, encoding="utf-8") as fh:
+                  lines = [ln for ln in fh if ln.strip()]
+          except FileNotFoundError:
+              log(f"GUARD: ledger {path} not found -> treat as NOT delivered, proceeding.")
+              print("PROCEED"); sys.exit(0)
+          except OSError as exc:
+              log(f"GUARD-ERROR: cannot read ledger ({exc}) -> fail-soft, proceeding. ANOMALY.")
+              print("PROCEED_ANOMALY"); sys.exit(0)
+          hit, bad = None, 0
+          for ln in lines:
+              try:
+                  entry = json.loads(ln)
+              except ValueError:
+                  bad += 1
+                  continue
+              if entry.get("day") == day and entry.get("status") == "SENT":
+                  hit = entry
+                  break
+          if bad:
+              log(f"GUARD-WARN: {bad} unparseable ledger line(s) skipped.")
+          if hit is not None:
+              log(f"SKIP: digest for {day} already delivered (ledger key={hit.get('idempotency_key')}), skipping regenerate/commit/email.")
+              print("SKIP"); sys.exit(0)
+          log(f"GUARD: no SENT record for {day} -> proceeding with full pipeline.")
+          print("PROCEED")
+          PY
+          )
+          echo "guard decision: '${DECISION}'"
+          case "$DECISION" in
+            SKIP)
+              echo "skip=true" >> "$GITHUB_OUTPUT" ;;
+            PROCEED)
+              echo "skip=false" >> "$GITHUB_OUTPUT" ;;
+            PROCEED_ANOMALY)
+              echo "::warning::Idempotency guard hit a ledger read error; proceeding fail-soft (may double-send). Investigate digests/.email-log.jsonl."
+              echo "skip=false" >> "$GITHUB_OUTPUT" ;;
+            *)
+              echo "::warning::Idempotency guard produced no decision (script/parse failure); proceeding fail-soft (may double-send)."
+              echo "skip=false" >> "$GITHUB_OUTPUT" ;;
+          esac
       - name: Install backend
+        if: steps.guard.outputs.skip != 'true'
         working-directory: ai-intelligence-monitor/backend
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e .
       - name: Run daily digest (RSS + Juhe discovery, safe fetch, DeepSeek, render)
+        if: steps.guard.outputs.skip != 'true'
         working-directory: ai-intelligence-monitor/backend
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
@@ -38,13 +126,14 @@ jobs:
         # across both boards, 48h freshness window.
         run: python -m app.scripts.daily_global_ai --rss --juhe --fetch --analyze --render --max-fetch 50 --max-analyze 35 --lookback-hours 48
       - name: Upload full run artifacts (audit trail)
-        if: always()
+        if: always() && steps.guard.outputs.skip != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: daily-run-${{ github.run_id }}
           path: ai-intelligence-monitor/runs/
           retention-days: 90
       - name: Commit digest back to repository
+        if: steps.guard.outputs.skip != 'true'
         run: |
           DIGEST=$(ls -d ai-intelligence-monitor/runs/*-daily-ai/04-digest.txt 2>/dev/null | tail -1)
           if [ -z "$DIGEST" ]; then
@@ -87,6 +176,7 @@ jobs:
           git pull --rebase origin main
           git push origin main
       - name: Email the digest (Gate-checked; sends only if Ops passed)
+        if: steps.guard.outputs.skip != 'true'
         working-directory: ai-intelligence-monitor/backend
         env:
           EMAIL_DELIVERY_ENABLED: "true"
@@ -101,6 +191,7 @@ jobs:
         # outcome for the workflow, so a blocked send never marks the run red.
         run: python -m app.scripts.send_digest_email --send || [ $? -eq 2 ]
       - name: Commit email ledger
+        if: steps.guard.outputs.skip != 'true'
         run: |
           if [ -z "$(git status --porcelain digests/.email-log.jsonl)" ]; then
             echo "no ledger change"; exit 0
