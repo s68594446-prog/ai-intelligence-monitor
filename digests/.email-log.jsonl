@@ -10,3 +10,5 @@
 {"idempotency_key": "584e0d855f2461f0f9d8c7d3ebcb8aa061d771720a25c3f0c417f2f1e9dea7be", "day": "2026-07-29", "status": "SENT", "recipient_count": 3, "recorded_at": "2026-07-28T23:47:40.860790+00:00"}
 {"idempotency_key": "f94c98389db4f9ec8bf92f6e6e110c99cc97af17c8cdad2aa6a9bc1f081e12db", "day": "2026-07-31", "status": "PENDING", "recipient_count": 3, "recorded_at": "2026-07-30T23:56:23.039859+00:00"}
 {"idempotency_key": "f94c98389db4f9ec8bf92f6e6e110c99cc97af17c8cdad2aa6a9bc1f081e12db", "day": "2026-07-31", "status": "SENT", "recipient_count": 3, "recorded_at": "2026-07-30T23:56:24.080211+00:00"}
+{"idempotency_key": "6f37da580982d9848033abcb717732d38fa43ea4f9b06ea04d12fbba3df2ba03", "day": "2026-08-03", "status": "PENDING", "recipient_count": 3, "recorded_at": "2026-08-02T23:42:00.241902+00:00"}
+{"idempotency_key": "6f37da580982d9848033abcb717732d38fa43ea4f9b06ea04d12fbba3df2ba03", "day": "2026-08-03", "status": "SENT", "recipient_count": 3, "recorded_at": "2026-08-02T23:42:01.547047+00:00"}
