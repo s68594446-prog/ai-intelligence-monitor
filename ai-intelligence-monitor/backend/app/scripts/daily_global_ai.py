@@ -20,7 +20,13 @@ from app.daily_ai.global_analysis import (
     ProviderCallError,
 )
 from app.daily_ai.global_digest import render_global_digest, select_global_digest
-from app.daily_ai.global_ops import advice_violations, check_global_channel, numeric_claim_cited
+from app.daily_ai.global_ops import (
+    advice_violations,
+    check_global_channel,
+    numeric_claim_cited,
+    sourcing_matches_tier,
+    sourcing_tier_diagnostics,
+)
 from app.daily_ai.juhe import JuheAiBriefAdapter, JuheError, JuheHeadlinesAdapter
 from app.daily_ai.ops import check_a_share_channel
 from app.daily_ai.pdf import SafeOfficialPdfFetcher
@@ -384,6 +390,16 @@ def run():
                         # so one offender used to block the entire email.
                         elif not numeric_claim_cited(analysis):
                             analysis_failures.append({"url": candidate.canonical_url, "error_code": "NUMERIC_CLAIM_UNCITED", "diagnostics": {"headline": analysis.headline[:120], "quotes": [e.quote[:160] for e in analysis.evidence]}})
+                        # Source Tier is deterministic and must not depend on the
+                        # model's label. Drop one mislabelled item fail-soft so an
+                        # unpublished analysis cannot block the entire digest.
+                        # Ops applies the same rule again as a backstop.
+                        elif not sourcing_matches_tier(analysis, policy):
+                            analysis_failures.append({
+                                "url": candidate.canonical_url,
+                                "error_code": "SOURCING_TIER_MISMATCH",
+                                "diagnostics": sourcing_tier_diagnostics(analysis, policy),
+                            })
                         else:
                             analyses.append(analysis)
                             analysis_urls[str(analysis.evidence[0].source_url)] = candidate.candidate_id

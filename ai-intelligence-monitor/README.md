@@ -1,6 +1,6 @@
-# AI Intelligence Monitor — Phase 0–3B
+# AI Intelligence Monitor — Phase 0–3C
 
-An auditable harness for dependency-based personal investment research. Phase 0 provides versioned coverage, evidence contracts, a controlled state machine, replay, deterministic operations checks, and fixture-driven tests. Phase 1 adds manually supplied DRAM/HBM source text and bounded OpenAI or DeepSeek structured analysis. Phase 2 adds manual, allowlisted collection from three official T1 sources. Phase 3A adds disabled-by-default, gated SMTP email delivery for an existing passed alert brief. Phase 3B adds disabled-by-default, bounded multi-provider web discovery while preserving the existing evidence and signal gates. It still does not schedule jobs, connect Gmail, provide investment advice, or expose a frontend.
+An auditable harness for dependency-based personal investment research. Phase 0 provides versioned coverage, evidence contracts, a controlled state machine, replay, deterministic operations checks, and fixture-driven tests. Phase 1 adds manually supplied DRAM/HBM source text and bounded OpenAI or DeepSeek structured analysis. Phase 2 adds manual, allowlisted collection from three official T1 sources. Phase 3A adds disabled-by-default, gated SMTP email delivery for an existing passed alert brief. Phase 3B adds disabled-by-default, bounded multi-provider web discovery while preserving the existing evidence and signal gates. Phase 3C is an isolated GitHub Actions daily AI-supply-chain digest with its own deterministic Digest Ops and email gate. The frozen DRAM/HBM Harness itself remains unscheduled and unchanged. The project does not connect Gmail, provide investment advice, or expose a frontend.
 
 The additive daily China AI channel is isolated from the frozen DRAM/HBM Signal pipeline. TianAPI is optional and disabled by default. Juhe ID 235 technology headlines and ID 850 AI briefs are separately keyed, bounded discovery providers; their titles and summaries are never evidence. A-share scope is anchored to official constituents of CSI `931071` and SSE STAR `950180`; final items require safely fetched official primary text and exact evidence quotes. Juhe stock data ID 21 is not integrated. See [`docs/DAILY_AI_A_SHARE.md`](docs/DAILY_AI_A_SHARE.md).
 
@@ -157,3 +157,17 @@ python -m app.scripts.discover_web
 Network and model stages require explicit ordered flags: `--search --triage --fetch --analyze`. The provider is selected from a fixed registry with `--provider`; arbitrary endpoints are not accepted. The default SearXNG endpoint is fixed to `http://127.0.0.1:8080/search`, and all returned URLs still pass the public-web fetch gates. See [`docs/PHASE_3B.md`](docs/PHASE_3B.md) for routing and local runtime operations.
 
 News discovery is invoked only with `--news --news-provider thenewsapi` and remains bounded to page one, two deterministic queries, and three links per query. The free allowance may return 402 (usage exhausted) or 429 (rate limited); both fail closed without switching to a Web provider. The API supplies only short metadata and links. Formal Evidence still requires a successful safe fetch of the original T1/T2 article. Usage headers can be audited through the run artifact without displaying the credential or complete provider response.
+
+## Phase 3C scheduled daily supply-chain digest
+
+Phase 3C is additive and does not write the frozen DRAM/HBM Run, Signal, Adjudication, Evidence, Replay, or Ops state. The parent repository workflow `.github/workflows/daily-digest.yml` runs at `22:30 UTC` (nominally `06:30 Asia/Shanghai`; GitHub schedules may start later), performs bounded RSS/Juhe discovery, safe T1/T2 fetch, DeepSeek structured analysis, deterministic selection, rendering, and Digest Ops, then uploads the complete run artifact.
+
+Digest publication and email are fail-closed:
+
+- A source-tier/model-label mismatch is rejected per item as `SOURCING_TIER_MISMATCH` and retained in `analysis-failures.json`; one rejected unpublished analysis cannot block otherwise valid items.
+- Digest Ops rechecks source-tier consistency and records named offenders as a backstop.
+- A missing or failed `ops.json` makes the GitHub job fail after artifact upload. No digest is committed and no email is attempted.
+- Only an Ops-passed digest is staged, email-gated, sent, and then committed together with its email ledger update.
+- Any email Gate block or SMTP failure makes the workflow fail instead of being reported as a green run.
+
+The day-level ledger guard prevents ordinary scheduled duplicates, and the delivery service also uses a day/content/recipient idempotency key. The separate manual `email-digest.yml` workflow remains available for Gate dry-runs or controlled delivery attempts against an already committed digest; the same idempotency key still prevents an identical resend. SMTP and provider credentials remain GitHub Secrets or local ignored environment values and are never written to digest artifacts.

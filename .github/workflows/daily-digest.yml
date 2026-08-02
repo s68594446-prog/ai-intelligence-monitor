@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       force:
-        description: "Bypass the same-day idempotency guard (regenerate, OVERWRITE the archive, and RE-SEND). Default false."
+        description: "Bypass the same-day guard and regenerate. Content-keyed email idempotency still prevents an identical resend."
         type: boolean
         default: false
 
@@ -22,8 +22,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
       # Idempotency guard: runs BEFORE install/discovery/DeepSeek. If today's
@@ -35,10 +35,9 @@ jobs:
       # script's content-keyed idempotency in email_digest.py — that is exactly
       # why 2026-07-27's two runs each sent a mail; this closes that.
       #
-      # KNOWN EDGES (intentionally NOT handled this round):
-      #  * Race: two overlapping runs can both read the ledger before either has
-      #    committed its SENT record, so both proceed and double-send. No lock is
-      #    added by request; documented here as accepted.
+      # KNOWN EDGE: the separate manual email-digest workflow has its own
+      # concurrency group. A manual send can therefore race this workflow. The
+      # content-keyed ledger is the final duplicate-send guard.
       #  * Digest file exists but has no SENT record (a prior send failed): the
       #    guard sees no SENT and proceeds to regenerate/overwrite/re-send. This
       #    is accepted for now — we would rather re-send than silently drop a day.
@@ -127,12 +126,20 @@ jobs:
         run: python -m app.scripts.daily_global_ai --rss --juhe --fetch --analyze --render --max-fetch 50 --max-analyze 35 --lookback-hours 48
       - name: Upload full run artifacts (audit trail)
         if: always() && steps.guard.outputs.skip != 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: daily-run-${{ github.run_id }}
           path: ai-intelligence-monitor/runs/
           retention-days: 90
-      - name: Commit digest back to repository
+      # The generator deliberately exits zero after writing a complete audit,
+      # even when Ops fails. Make that business result an explicit CI gate after
+      # the always-run artifact upload. Nothing below this step may publish or
+      # deliver a failed digest.
+      - name: Verify digest Ops Gate
+        if: steps.guard.outputs.skip != 'true'
+        working-directory: ai-intelligence-monitor/backend
+        run: python -m app.scripts.verify_daily_digest_ops
+      - name: Prepare audited digest for delivery
         if: steps.guard.outputs.skip != 'true'
         run: |
           DIGEST=$(ls -d ai-intelligence-monitor/runs/*-daily-ai/04-digest.txt 2>/dev/null | tail -1)
@@ -169,12 +176,6 @@ jobs:
               echo '```'
             } >> "digests/${DAY}.md"
           fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add digests
-          git commit -m "digest: ${DAY}" || { echo "nothing to commit"; exit 0; }
-          git pull --rebase origin main
-          git push origin main
       - name: Email the digest (Gate-checked; sends only if Ops passed)
         if: steps.guard.outputs.skip != 'true'
         working-directory: ai-intelligence-monitor/backend
@@ -187,18 +188,19 @@ jobs:
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           SMTP_FROM: ${{ secrets.SMTP_FROM }}
           SMTP_TO: ${{ secrets.SMTP_TO }}
-        # Exit 2 = Gate blocked (e.g. Ops not passed): a normal, non-failing
-        # outcome for the workflow, so a blocked send never marks the run red.
-        run: python -m app.scripts.send_digest_email --send || [ $? -eq 2 ]
-      - name: Commit email ledger
+        # Any Gate block or SMTP failure is an automation failure. Do not turn a
+        # business-level BLOCKED result into a green GitHub run.
+        run: python -m app.scripts.send_digest_email --send
+      - name: Commit delivered digest and email ledger
         if: steps.guard.outputs.skip != 'true'
         run: |
-          if [ -z "$(git status --porcelain digests/.email-log.jsonl)" ]; then
-            echo "no ledger change"; exit 0
+          DAY=$(TZ=Asia/Shanghai date +%F)
+          if [ -z "$(git status --porcelain -- "digests/${DAY}.md" digests/.email-log.jsonl)" ]; then
+            echo "no digest or ledger change"; exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add digests/.email-log.jsonl
-          git commit -m "email: send ledger update"
+          git add "digests/${DAY}.md" digests/.email-log.jsonl
+          git commit -m "digest: ${DAY} + email ledger"
           git pull --rebase origin main
           git push origin main

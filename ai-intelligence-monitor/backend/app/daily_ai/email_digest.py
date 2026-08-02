@@ -177,7 +177,7 @@ def deliver_latest(
     ledger_path: Path,
     send: bool,
 ) -> dict:
-    """Gate + (optional) send for the most recent committed digest."""
+    """Gate + (optional) send for the most recent prepared digest file."""
     path = latest_digest_path(digests_dir)
     if path is None:
         return {"status": "BLOCKED", "reasons": ["NO_DIGEST_FOUND"]}

@@ -1,8 +1,8 @@
 name: email-digest
 
 # Manual test-send only. This does NOT re-run discovery/analysis — it emails
-# the latest already-committed digest in digests/. Daily auto-send is a
-# separate, still-disabled path; turn it on only after a good test send.
+# the latest already-committed digest in digests/. Scheduled generation and
+# auto-send are handled separately by daily-digest.yml.
 on:
   workflow_dispatch:
     inputs:
@@ -23,8 +23,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
       - name: Install backend

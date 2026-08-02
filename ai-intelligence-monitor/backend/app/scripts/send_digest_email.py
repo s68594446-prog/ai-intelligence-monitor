@@ -12,7 +12,7 @@ LEDGER_PATH = DIGESTS_DIR / ".email-log.jsonl"
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Email the latest committed daily digest; default is a Gate dry-run with no SMTP")
+    parser = argparse.ArgumentParser(description="Email the latest prepared daily digest; default is a Gate dry-run with no SMTP")
     parser.add_argument("--send", action="store_true", help="actually connect to SMTP and send (otherwise Gate check only)")
     parser.add_argument("--digests-dir", type=Path, default=DIGESTS_DIR)
     args = parser.parse_args()

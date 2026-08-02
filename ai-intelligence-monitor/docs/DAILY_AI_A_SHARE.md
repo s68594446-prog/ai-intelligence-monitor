@@ -47,3 +47,24 @@ On 2026-07-22 the Juhe live smoke passed: ID 235 headlines and ID 850 AI brief e
 The A-share channel is suspended as **environment-blocked**, not abandoned and not deleted. The code is complete and frozen at checkpoint `9898078` (`checkpoint: A-share AI channel (offline-verified, live pending)`). Offline verification passes and Juhe discovery is live-verified. Live acceptance cannot proceed because the local fake-IP DNS layer resolves every official T1 domain (SSE, SZSE, BSE, CNINFO) to reserved 198.18.x.x addresses, so the unchanged SSRF gate rejects every primary-evidence fetch with `NON_PUBLIC_ADDRESS`. This is an operator-environment blocker; the gate must not be relaxed to work around it. The channel resumes when the local DNS environment returns real public addresses for the official domains.
 
 Phase 3C (global AI news channel) starts early because of this external network blocker, not because of any defect in the A-share code. Global T1/T2 sources resolve to real public addresses through the operator's VPN, so the SSRF gate passes them and the full discovery → safe fetch → DeepSeek analysis → digest loop is achievable on this machine.
+
+## Phase 3C automation boundary
+
+The active Phase 3C scheduler is the parent repository's GitHub Actions
+`daily-digest.yml`, not a macOS LaunchAgent and not the frozen DRAM/HBM Harness.
+It runs the isolated global digest channel and uploads the complete run artifact
+before applying its publication gate.
+
+Source Tier remains deterministic. If a model labels T2 evidence as
+`FIRSTHAND_OFFICIAL`, or labels all-T1 evidence as `SECONDHAND_REPORT`, that one
+analysis is discarded as `SOURCING_TIER_MISMATCH` and recorded with the actual
+label, expected label, URL, and tier. Digest Ops applies the same rule again and
+names any offender. It never promotes a retelling, weakens the T1/T2 policy, or
+changes the frozen Evidence Gate.
+
+An absent or failed Digest Ops result is an automation failure: the artifact is
+retained for diagnosis, while repository publication and SMTP delivery are both
+blocked. An Ops-passed digest is sent through the separate digest email gate;
+only after successful delivery are the digest and append-only email ledger
+committed together. A blocked Gate or SMTP failure must be visible as a failed
+GitHub run, not normalized to a green workflow.

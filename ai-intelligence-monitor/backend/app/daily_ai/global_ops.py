@@ -125,6 +125,44 @@ def advice_violations(item: GlobalAiAnalysisContract) -> list[str]:
     return matched
 
 
+def sourcing_tier_diagnostics(
+    item: GlobalAiAnalysisContract,
+    policy: WebSourcePolicy,
+) -> dict[str, object]:
+    """Return deterministic diagnostics for the model's sourcing label.
+
+    FIRSTHAND_OFFICIAL is valid only when every cited evidence page is T1.
+    Any T2 evidence makes the item SECONDHAND_REPORT.  The model may describe
+    the original announcer, but it may not promote a media retelling to T1.
+    """
+    evidence = [
+        {
+            "url": str(entry.source_url),
+            "tier": classify_url(str(entry.source_url), policy)[0].value,
+        }
+        for entry in item.evidence
+    ]
+    expected = (
+        "FIRSTHAND_OFFICIAL"
+        if evidence and all(entry["tier"] == ClassifiedTier.T1.value for entry in evidence)
+        else "SECONDHAND_REPORT"
+    )
+    return {
+        "headline": item.headline[:120],
+        "actual_sourcing": item.sourcing,
+        "expected_sourcing": expected,
+        "evidence": evidence,
+        "consistent": item.sourcing == expected,
+    }
+
+
+def sourcing_matches_tier(
+    item: GlobalAiAnalysisContract,
+    policy: WebSourcePolicy,
+) -> bool:
+    return bool(sourcing_tier_diagnostics(item, policy)["consistent"])
+
+
 def check_global_channel(
     *,
     analyses: list[GlobalAiAnalysisContract],
@@ -180,6 +218,16 @@ def check_global_channel(
         a.headline[:80] for a in analyses
         if not all(quote_matches(e.quote, raw_text_by_url.get(str(e.source_url), "")) for e in a.evidence)
     ]
+    offenders["firsthand_tier_consistent"] = [
+        (
+            f"{diagnostics['headline']} → actual={diagnostics['actual_sourcing']}, "
+            f"expected={diagnostics['expected_sourcing']}, "
+            f"tiers={','.join(str(entry['tier']) for entry in diagnostics['evidence'])}"
+        )
+        for a in analyses
+        for diagnostics in [sourcing_tier_diagnostics(a, policy)]
+        if not diagnostics["consistent"]
+    ]
     unpublished_findings = {name: items for name, items in presentation_findings(unpublished).items() if items}
 
     sector_counts: dict[str, int] = {}
@@ -200,11 +248,7 @@ def check_global_channel(
             a.novelty != "REPEATED_STATEMENT" for a in analyses if a.importance_score >= IMPORTANCE_THRESHOLD
         ),
         "region_basis_recorded": all(bool(a.region_basis.strip()) for a in analyses),
-        "firsthand_tier_consistent": all(
-            (a.sourcing == "FIRSTHAND_OFFICIAL")
-            == all(classify_url(str(e.source_url), policy)[0] == ClassifiedTier.T1 for e in a.evidence)
-            for a in analyses
-        ),
+        "firsthand_tier_consistent": not offenders["firsthand_tier_consistent"],
         "secondhand_origin_noted": all(
             a.sourcing != "SECONDHAND_REPORT" or bool(a.original_source.strip()) for a in analyses
         ),
