@@ -14,3 +14,5 @@
 {"idempotency_key": "6f37da580982d9848033abcb717732d38fa43ea4f9b06ea04d12fbba3df2ba03", "day": "2026-08-03", "status": "SENT", "recipient_count": 3, "recorded_at": "2026-08-02T23:42:01.547047+00:00"}
 {"idempotency_key": "6a38891155f681c301bf6238cd4bc615e360441341f144236446c80810081b67", "day": "2026-08-04", "status": "PENDING", "recipient_count": 3, "recorded_at": "2026-08-03T23:54:52.628888+00:00"}
 {"idempotency_key": "6a38891155f681c301bf6238cd4bc615e360441341f144236446c80810081b67", "day": "2026-08-04", "status": "SENT", "recipient_count": 3, "recorded_at": "2026-08-03T23:54:53.788597+00:00"}
+{"idempotency_key": "61a06845d14b4463c8b3779cce6fcdaf021cec87fdd2e6177aad962373053f70", "day": "2026-08-05", "status": "PENDING", "recipient_count": 3, "recorded_at": "2026-08-04T23:54:56.124344+00:00"}
+{"idempotency_key": "61a06845d14b4463c8b3779cce6fcdaf021cec87fdd2e6177aad962373053f70", "day": "2026-08-05", "status": "SENT", "recipient_count": 3, "recorded_at": "2026-08-04T23:54:57.313338+00:00"}
