@@ -26,7 +26,7 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
-      # Idempotency guard: runs BEFORE install/discovery/DeepSeek. If today's
+      # Idempotency guard: runs BEFORE install/discovery/Gemini. If today's
       # Asia/Shanghai digest is already delivered (a committed ledger record with
       # day == today AND status == SENT), skip the whole pipeline so a second
       # same-day run cannot overwrite the archive or send a second email.
@@ -112,16 +112,18 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e .
-      - name: Run daily digest (RSS + Juhe discovery, safe fetch, DeepSeek, render)
+      - name: Run daily digest (RSS + Juhe discovery, safe fetch, Gemini, render)
         if: steps.guard.outputs.skip != 'true'
         working-directory: ai-intelligence-monitor/backend
         env:
-          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_ANALYSIS_MODEL: ${{ vars.GEMINI_ANALYSIS_MODEL || 'gemini-3.5-flash' }}
+          GEMINI_BASE_URL: ${{ vars.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta' }}
           JUHE_HEADLINES_ENABLED: "true"
           JUHE_HEADLINES_API_KEY: ${{ secrets.JUHE_HEADLINES_API_KEY }}
           JUHE_AI_BRIEF_ENABLED: "true"
           JUHE_AI_BRIEF_API_KEY: ${{ secrets.JUHE_AI_BRIEF_API_KEY }}
-        # Scaled budgets: up to 50 page fetches and 35 DeepSeek calls per run
+        # Scaled budgets: up to 50 page fetches and 35 Gemini calls per run
         # across both boards, 48h freshness window.
         run: python -m app.scripts.daily_global_ai --rss --juhe --fetch --analyze --render --max-fetch 50 --max-analyze 35 --lookback-hours 48
       - name: Upload full run artifacts (audit trail)

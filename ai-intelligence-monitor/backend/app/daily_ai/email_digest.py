@@ -17,6 +17,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from app.core.settings import Settings
 from app.delivery.contracts import EmailDeliveryRequest
@@ -37,6 +38,23 @@ class DigestGateResult:
     day: str
     body: str
     ops_passed: bool
+
+
+@dataclass(frozen=True)
+class EmailDigestItem:
+    headline: str
+    what_happened: str
+    analysis: str
+    companies_and_path: str
+    source_url: str
+    source_note: str
+    other_sources: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class EmailDigestSection:
+    label: str
+    items: tuple[EmailDigestItem, ...]
 
 
 def split_digest_body(markdown: str) -> str:
@@ -86,30 +104,234 @@ def build_subject(day: str) -> str:
     return f"AI Supply Chain Daily｜{day}"
 
 
+SECTION_RE = re.compile(r"^═══\s*【(.+?)】\s*═══$")
+HEADLINE_RE = re.compile(r"^【(.+?)】$")
+SOURCE_RE = re.compile(r"^(https?://[^\s（]+)(.*)$")
+EMAIL_SECTOR_LABELS = {"封装·设备·材料": "封装、设备与材料"}
+
+
+def _parse_item(lines: list[str]) -> EmailDigestItem | None:
+    values = [line.strip() for line in lines if line.strip()]
+    if not values:
+        return None
+    headline_match = HEADLINE_RE.fullmatch(values[0])
+    if not headline_match:
+        return None
+
+    what_happened: list[str] = []
+    analysis: list[str] = []
+    companies_and_path: list[str] = []
+    source_url = ""
+    source_note = ""
+    other_sources: list[str] = []
+    field = "what"
+    for value in values[1:]:
+        if value.startswith("💡 分析："):
+            field = "analysis"
+            analysis.append(value.removeprefix("💡 分析：").strip())
+        elif value.startswith("📍 涉及："):
+            field = "chain"
+            companies_and_path.append(value.removeprefix("📍 涉及：").strip())
+        elif value.startswith("🔗 来源："):
+            field = "source"
+            source = value.removeprefix("🔗 来源：").strip()
+            match = SOURCE_RE.match(source)
+            if match:
+                source_url, source_note = match.group(1), match.group(2).strip()
+            else:
+                source_note = source
+        elif value.startswith("其他来源：") or value.startswith("　　其他来源："):
+            field = "other_sources"
+            source_list = value.split("：", 1)[1]
+            other_sources.extend(
+                part.strip() for part in source_list.split("、") if part.strip()
+            )
+        elif field == "what":
+            what_happened.append(value)
+        elif field == "analysis":
+            analysis.append(value)
+        elif field == "chain":
+            companies_and_path.append(value)
+
+    return EmailDigestItem(
+        headline=headline_match.group(1),
+        what_happened=" ".join(what_happened),
+        analysis=" ".join(analysis),
+        companies_and_path=" ".join(companies_and_path),
+        source_url=source_url,
+        source_note=source_note,
+        other_sources=tuple(other_sources),
+    )
+
+
+def parse_digest_sections(body: str) -> tuple[EmailDigestSection, ...]:
+    """Parse the deterministic reader-facing digest format for HTML only."""
+    sections: list[EmailDigestSection] = []
+    label: str | None = None
+    item_lines: list[str] = []
+    items: list[EmailDigestItem] = []
+
+    def flush_item() -> None:
+        nonlocal item_lines
+        item = _parse_item(item_lines)
+        if item is not None:
+            items.append(item)
+        item_lines = []
+
+    def flush_section() -> None:
+        nonlocal items
+        flush_item()
+        if label is not None and items:
+            sections.append(
+                EmailDigestSection(
+                    label=EMAIL_SECTOR_LABELS.get(label, label),
+                    items=tuple(items),
+                )
+            )
+        items = []
+
+    for raw_line in body.splitlines():
+        stripped = raw_line.strip()
+        section = SECTION_RE.fullmatch(stripped)
+        if section:
+            flush_section()
+            label = section.group(1)
+            continue
+        if stripped == "───":
+            flush_item()
+            continue
+        if label is not None:
+            item_lines.append(raw_line)
+    flush_section()
+    return tuple(sections)
+
+
+def _safe_link(url: str, *, label: str | None = None) -> str:
+    parsed = urlsplit(url)
+    escaped = html.escape(label or url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return escaped
+    return (
+        f'<a href="{html.escape(url, quote=True)}" '
+        'style="color:#1769aa;text-decoration:underline;word-break:break-all">'
+        f"{escaped}</a>"
+    )
+
+
+def _detail_row(label: str, value: str) -> str:
+    return (
+        '<tr><td style="padding:0 22px 16px 22px">'
+        f'<div style="font-size:11px;line-height:16px;letter-spacing:.08em;'
+        f'color:#64748b;font-weight:700;margin:0 0 5px 0">{html.escape(label)}</div>'
+        f'<div style="font-size:14px;line-height:23px;color:#25364a;margin:0">'
+        f'{html.escape(value or "未明确列出")}</div></td></tr>'
+    )
+
+
+def _render_card(item: EmailDigestItem) -> str:
+    source = _safe_link(item.source_url) if item.source_url else html.escape(
+        item.source_note or "未提供"
+    )
+    if item.source_note and item.source_url:
+        source += (
+            '<div style="font-size:12px;line-height:19px;color:#64748b;margin-top:4px">'
+            f'{html.escape(item.source_note)}</div>'
+        )
+    if item.other_sources:
+        supplemental = "<br>".join(
+            _safe_link(url, label=f"补充来源 {index}")
+            for index, url in enumerate(item.other_sources, 1)
+        )
+    else:
+        supplemental = '<span style="color:#94a3b8">无</span>'
+
+    return (
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+        'border="0" style="width:100%;border:1px solid #dbe4ee;border-collapse:separate;'
+        'border-spacing:0;background-color:#ffffff;border-radius:8px;margin:0 0 14px 0">'
+        '<tr><td style="padding:19px 22px 15px 22px;border-left:4px solid #2774a8">'
+        f'<div style="font-size:17px;line-height:25px;color:#102a43;font-weight:700">'
+        f'{html.escape(item.headline)}</div></td></tr>'
+        + _detail_row("发生了什么", item.what_happened)
+        + _detail_row("产业链解读", item.analysis)
+        + _detail_row("涉及公司与传导路径", item.companies_and_path)
+        + '<tr><td style="padding:0 22px 20px 22px">'
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+        'border="0" style="width:100%;background-color:#f6f9fc;border-collapse:collapse">'
+        '<tr><td style="width:50%;vertical-align:top;padding:12px 14px;border-right:1px solid #dbe4ee">'
+        '<div style="font-size:11px;line-height:16px;letter-spacing:.08em;color:#64748b;'
+        'font-weight:700;margin-bottom:5px">原始来源</div>'
+        f'<div style="font-size:12px;line-height:19px">{source}</div></td>'
+        '<td style="width:50%;vertical-align:top;padding:12px 14px">'
+        '<div style="font-size:11px;line-height:16px;letter-spacing:.08em;color:#64748b;'
+        'font-weight:700;margin-bottom:5px">补充来源</div>'
+        f'<div style="font-size:12px;line-height:19px">{supplemental}</div></td></tr>'
+        '</table></td></tr></table>'
+    )
+
+
 def render_bodies(day: str, body: str) -> tuple[str, str]:
     """Plain-text and self-contained HTML bodies. No images, scripts, or tracking."""
     text_body = body if body.strip() else f"{build_subject(day)}\n\n今日无达到标准的产业链重点新闻"
-    lines = []
-    for line in body.splitlines():
-        stripped = line.strip()
-        if not stripped:
-            lines.append("<br>")
-        elif stripped.startswith("═══") or stripped.endswith("═══"):
-            label = stripped.strip("═ ")
-            lines.append(f'<h2 style="border-bottom:2px solid #888;padding-bottom:4px">{html.escape(label)}</h2>')
-        elif stripped.startswith("【") and stripped.endswith("】"):
-            lines.append(f'<h3 style="margin:18px 0 4px">{html.escape(stripped)}</h3>')
-        elif stripped == "───":
-            lines.append("<hr>")
-        else:
-            lines.append(f'<p style="margin:4px 0">{html.escape(stripped)}</p>')
+    sections = parse_digest_sections(body)
+    item_count = sum(len(section.items) for section in sections)
+    section_count = len(sections)
+    section_html = []
+    for section in sections:
+        cards = "".join(_render_card(item) for item in section.items)
+        section_html.append(
+            '<tr><td style="padding:8px 24px 2px 24px">'
+            '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+            'border="0" style="width:100%;border-collapse:collapse">'
+            '<tr><td style="padding:10px 0 12px 0;border-bottom:2px solid #c8d8e8">'
+            f'<span style="font-size:18px;line-height:26px;color:#153e5c;font-weight:700">'
+            f'{html.escape(section.label)}</span>'
+            f'<span style="font-size:12px;color:#64748b;margin-left:8px">'
+            f'{len(section.items)} 条</span></td></tr>'
+            f'<tr><td style="padding:14px 0 4px 0">{cards}</td></tr>'
+            '</table></td></tr>'
+        )
+    if not section_html:
+        section_html.append(
+            '<tr><td style="padding:34px 28px;text-align:center;font-size:15px;'
+            'line-height:24px;color:#52667a">今日无达到标准的产业链重点新闻</td></tr>'
+        )
     html_body = (
         '<!doctype html><html><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width, initial-scale=1"></head>'
-        '<body style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;'
-        'max-width:720px;margin:0 auto;padding:16px;color:#1a1a1a;line-height:1.6">'
-        + "\n".join(lines)
-        + "</body></html>"
+        '<body style="margin:0;padding:0;background-color:#eef3f8;'
+        'font-family:Arial,Helvetica,sans-serif;color:#25364a">'
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+        'border="0" style="width:100%;background-color:#eef3f8;border-collapse:collapse">'
+        '<tr><td align="center" style="padding:22px 10px">'
+        '<table role="presentation" width="660" cellpadding="0" cellspacing="0" '
+        'border="0" style="width:100%;max-width:660px;background-color:#ffffff;'
+        'border-collapse:collapse;border-radius:10px;overflow:hidden">'
+        '<tr><td style="padding:30px 28px 24px 28px;background-color:#0d2942;'
+        'border-top:5px solid #36a3c8">'
+        '<div style="font-size:12px;line-height:18px;letter-spacing:.14em;'
+        'color:#8ed4eb;font-weight:700;margin-bottom:8px">AI SUPPLY CHAIN INTELLIGENCE</div>'
+        '<div style="font-size:28px;line-height:36px;color:#ffffff;font-weight:700">'
+        'AI 产业链日报</div>'
+        f'<div style="font-size:14px;line-height:22px;color:#c7d7e6;margin-top:6px">'
+        f'{html.escape(day)}</div></td></tr>'
+        '<tr><td style="padding:18px 24px 10px 24px;background-color:#f8fafc">'
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+        'border="0" style="width:100%;border-collapse:collapse">'
+        '<tr><td style="width:50%;padding:10px 12px;border-right:1px solid #dbe4ee">'
+        '<div style="font-size:11px;color:#64748b;letter-spacing:.08em">当日新闻</div>'
+        f'<div style="font-size:23px;line-height:30px;color:#153e5c;font-weight:700">'
+        f'{item_count} <span style="font-size:13px;font-weight:400">条</span></div></td>'
+        '<td style="width:50%;padding:10px 12px">'
+        '<div style="font-size:11px;color:#64748b;letter-spacing:.08em">覆盖产业链环节</div>'
+        f'<div style="font-size:23px;line-height:30px;color:#153e5c;font-weight:700">'
+        f'{section_count} <span style="font-size:13px;font-weight:400">个</span></div></td>'
+        '</tr></table></td></tr>'
+        + "".join(section_html)
+        + '<tr><td style="padding:22px 28px;background-color:#f2f6fa;border-top:1px solid #dbe4ee;'
+        'font-size:12px;line-height:20px;color:#64748b;text-align:center">'
+        '内容仅用于产业研究与信息整理，不构成任何投资建议。'
+        '</td></tr></table></td></tr></table></body></html>'
     )
     return text_body, html_body
 

@@ -46,7 +46,7 @@ On 2026-07-22 the Juhe live smoke passed: ID 235 headlines and ID 850 AI brief e
 
 The A-share channel is suspended as **environment-blocked**, not abandoned and not deleted. The code is complete and frozen at checkpoint `9898078` (`checkpoint: A-share AI channel (offline-verified, live pending)`). Offline verification passes and Juhe discovery is live-verified. Live acceptance cannot proceed because the local fake-IP DNS layer resolves every official T1 domain (SSE, SZSE, BSE, CNINFO) to reserved 198.18.x.x addresses, so the unchanged SSRF gate rejects every primary-evidence fetch with `NON_PUBLIC_ADDRESS`. This is an operator-environment blocker; the gate must not be relaxed to work around it. The channel resumes when the local DNS environment returns real public addresses for the official domains.
 
-Phase 3C (global AI news channel) starts early because of this external network blocker, not because of any defect in the A-share code. Global T1/T2 sources resolve to real public addresses through the operator's VPN, so the SSRF gate passes them and the full discovery → safe fetch → DeepSeek analysis → digest loop is achievable on this machine.
+Phase 3C (global AI news channel) starts early because of this external network blocker, not because of any defect in the A-share code. Global T1/T2 sources resolve to real public addresses through the operator's VPN, so the SSRF gate passes them and the full discovery → safe fetch → Gemini analysis → digest loop is achievable on this machine.
 
 ## Phase 3C automation boundary
 
@@ -61,6 +61,17 @@ analysis is discarded as `SOURCING_TIER_MISMATCH` and recorded with the actual
 label, expected label, URL, and tier. Digest Ops applies the same rule again and
 names any offender. It never promotes a retelling, weakens the T1/T2 policy, or
 changes the frozen Evidence Gate.
+
+Phase 3C analysis uses the official Gemini GenerateContent API with
+`daily_global_ai_analysis_v8.txt` as its unchanged system instruction. The
+default stable model is `gemini-3.5-flash`; `gemini-3.5-flash-lite` is an
+explicit configuration option, not an automatic fallback. The API key is sent
+only in the `x-goog-api-key` header. Search Grounding and all other tools are
+absent from the request, and Gemini output must still pass the existing
+Pydantic, exact quote/URL, numeric citation, Source Tier, advice-language,
+market-action, and Digest Ops checks. A 429 or any other Gemini failure remains
+an audited fail-soft item failure and never switches to DeepSeek or a paid
+model automatically.
 
 An absent or failed Digest Ops result is an automation failure: the artifact is
 retained for diagnosis, while repository publication and SMTP delivery are both

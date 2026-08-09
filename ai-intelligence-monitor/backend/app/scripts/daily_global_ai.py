@@ -15,11 +15,11 @@ from app.daily_ai.digest import render_a_share_section, select_a_share_digest
 from app.daily_ai.discovery import keyword_prefilter, official_source
 from app.daily_ai.global_analysis import (
     AnalysisOutputError,
-    DeepSeekGlobalAiAnalysisAdapter,
     EvidenceMismatch,
     ProviderCallError,
 )
 from app.daily_ai.global_digest import render_global_digest, select_global_digest
+from app.daily_ai.gemini_analysis import GeminiGlobalAiAnalysisAdapter
 from app.daily_ai.global_ops import (
     advice_violations,
     check_global_channel,
@@ -50,7 +50,7 @@ QUERY_PLAN_PATH = CONFIG_DIR / "cn_ai_queries.yaml"
 SOURCE_POLICY_PATH = CONFIG_DIR / "daily_ai_source_policy.yaml"
 RSS_SOURCES_PATH = CONFIG_DIR / "rss_sources.yaml"
 KEYWORDS_PATH = CONFIG_DIR / "industry_keywords.yaml"
-PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts/daily_global_ai_analysis_v7.txt"
+PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts/daily_global_ai_analysis_v8.txt"
 FETCH_MAX_BYTES = 5_000_000
 # A T1 page we cannot fetch (403 / access challenge) may still be reachable
 # through a T2 retelling of the SAME event cluster. That substitute is fetched
@@ -89,7 +89,7 @@ def _args():
     parser.add_argument("--rss", action="store_true", help="RSS feed discovery (works on GitHub Actions)")
     parser.add_argument("--juhe", action="store_true", help="Juhe ID235/ID850 discovery (needs enabled flags and keys)")
     parser.add_argument("--fetch", action="store_true", help="safe-fetch T1/T2 candidates (requires --discover or --rss)")
-    parser.add_argument("--analyze", action="store_true", help="DeepSeek analysis of fetched text (requires --fetch)")
+    parser.add_argument("--analyze", action="store_true", help="Gemini analysis of fetched text (requires --fetch)")
     parser.add_argument("--render", action="store_true", help="render the digest (requires --analyze; empty digest is legal)")
     parser.add_argument("--a-share", action="store_true", help="run the A-share official-announcement section (requires --fetch)")
     parser.add_argument("--send", action="store_true", help="email delivery; fails closed, not configured in this phase")
@@ -197,7 +197,7 @@ def run():
         "stages": {"discover": args.discover, "rss": args.rss, "juhe": args.juhe, "fetch": args.fetch, "analyze": args.analyze, "render": args.render, "a_share": args.a_share},
     })
     if not (args.discover or args.rss):
-        print(json.dumps({"run_id": run_id, "status": "PLANNED", "plan": len(queries), "network_calls": 0, "deepseek_calls": 0}, sort_keys=True))
+        print(json.dumps({"run_id": run_id, "status": "PLANNED", "plan": len(queries), "network_calls": 0, "gemini_calls": 0}, sort_keys=True))
         return
 
     pages = []
@@ -316,6 +316,7 @@ def run():
     sources, blocked, analyses, analysis_failures = [], [], [], []
     analysis_urls: dict[str, str] = {}
     analyze_attempts = 0
+    provider_validated_outputs = 0
     if args.fetch:
         fetch_client = httpx.Client(timeout=settings.web_search_timeout_seconds, follow_redirects=False, trust_env=False)
         fetcher = WebPageFetcher(client=fetch_client, max_bytes=FETCH_MAX_BYTES, max_retries=0, minimum_interval_seconds=1)
@@ -323,6 +324,22 @@ def run():
         by_id = {item.candidate_id: item for item in candidates}
         planned_urls = {item.canonical_url for item in fetch_plan}
         analyzer = None
+        analyzer_error = None
+        if args.analyze:
+            try:
+                analyzer = GeminiGlobalAiAnalysisAdapter(
+                    api_key=settings.gemini_api_key,
+                    base_url=settings.gemini_base_url,
+                    model=settings.gemini_analysis_model,
+                    prompt_path=PROMPT_PATH,
+                    timeout_seconds=settings.llm_timeout_seconds,
+                    max_retries=settings.llm_max_retries,
+                )
+            except ValueError:
+                analyzer_error = {
+                    "reason_code": "GEMINI_CONFIGURATION_ERROR",
+                    "error_type": "ValueError",
+                }
         try:
             for candidate in list(fetch_plan):
                 result = fetcher.fetch(candidate, allowed_urls=allowed)
@@ -347,17 +364,19 @@ def run():
                     blocked.append({"url": candidate.canonical_url, "tier": candidate.source_tier.value, "status": result.status.value, "error_code": result.error_code})
                     continue
                 sources.append({"url": candidate.canonical_url, "tier": candidate.source_tier.value, "title": result.title or candidate.title, "sha256": result.response_sha256, "raw_text": result.raw_text})
-                # Budget counts DeepSeek attempts (cost), not accepted results:
+                # Budget counts Gemini attempts (quota), not accepted results:
                 # a discarded article must not buy a free extra call.
                 if args.analyze and analyze_attempts < args.max_analyze:
-                    if analyzer is None:
-                        analyzer = DeepSeekGlobalAiAnalysisAdapter(
-                            api_key=settings.deepseek_api_key or "",
-                            base_url=settings.deepseek_base_url, model=settings.deepseek_model,
-                            prompt_path=PROMPT_PATH,
-                            timeout_seconds=settings.llm_timeout_seconds, max_retries=settings.llm_max_retries,
-                        )
                     analyze_attempts += 1
+                    if analyzer is None:
+                        analysis_failures.append({
+                            "url": candidate.canonical_url,
+                            "error_code": "GEMINI_CONFIGURATION_ERROR",
+                            "diagnostics": analyzer_error or {
+                                "reason_code": "GEMINI_CONFIGURATION_ERROR"
+                            },
+                        })
+                        continue
                     # Fail-soft: any single-article failure is discarded with an
                     # audit record and the run continues. Nothing here may abort
                     # the whole run.
@@ -366,6 +385,7 @@ def run():
                             metadata={"title": result.title or candidate.title, "source_domain": urlsplit(candidate.canonical_url).hostname or "", "source_tier": candidate.source_tier.value},
                             raw_text=result.raw_text, source_url=candidate.canonical_url,
                         )
+                        provider_validated_outputs += 1
                         quality_reasons = check_text_quality({
                             "headline": analysis.headline,
                             "what_happened": analysis.what_happened,
@@ -412,6 +432,8 @@ def run():
                     except Exception as exc:  # absolute fail-soft guard
                         analysis_failures.append({"url": candidate.canonical_url, "error_code": f"UNEXPECTED_{type(exc).__name__}", "detail": str(exc)[:300]})
         finally:
+            if analyzer is not None:
+                analyzer.close()
             fetch_client.close()
     _write(run_dir / "02-fetch.json", {"run_id": run_id, "fetched": [{k: v for k, v in item.items() if k != "raw_text"} for item in sources], "blocked": blocked})
     _write(run_dir / "03-analysis-output.json", [item.model_dump(mode="json") for item in analyses])
@@ -434,6 +456,9 @@ def run():
     ops = check_global_channel(
         analyses=analyses, raw_text_by_url=raw_by_url, digest_items=digest_items, policy=policy,
         discarded_evidence_failures=sum(item["error_code"] == "EVIDENCE_MISMATCH" for item in analysis_failures),
+        analysis_provider_required=args.analyze,
+        analysis_attempts=analyze_attempts,
+        provider_validated_outputs=provider_validated_outputs,
     )
     _write(run_dir / "ops.json", ops.model_dump(mode="json"))
     _write(run_dir / "source-bundle.json", {
@@ -449,6 +474,7 @@ def run():
         "fetch_plan": {"global": len([c for c in fetch_plan if c in global_pool]), "china": len([c for c in fetch_plan if c in cn_pool]), "arxiv": len([c for c in fetch_plan if c in arxiv_pool])},
         "fetched": len(sources), "blocked": len(blocked),
         "analyze_attempts": analyze_attempts, "analyzed": len(analyses),
+        "provider_validated_outputs": provider_validated_outputs,
         "analysis_failures": len(analysis_failures), "digest_items": len(digest_items),
         "ops_passed": ops.passed,
         **a_share_counts,

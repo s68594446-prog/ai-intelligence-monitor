@@ -85,6 +85,18 @@ class Settings(BaseSettings):
     you_api_key: SecretStr | None = Field(default=None, validation_alias="YOU_API_KEY")
     gemini_api_key: SecretStr | None = Field(default=None, validation_alias="GEMINI_API_KEY")
     gemini_search_model: str = Field(default="gemini-2.5-flash", validation_alias="GEMINI_SEARCH_MODEL")
+    # Phase 3C analysis is isolated from the manual OpenAI/DeepSeek provider
+    # selector above.  Flash-Lite may be selected explicitly through the same
+    # environment variable; there is deliberately no automatic model fallback.
+    gemini_analysis_model: str = Field(
+        default="gemini-3.5-flash",
+        pattern=r"^[A-Za-z0-9._-]+$",
+        validation_alias="GEMINI_ANALYSIS_MODEL",
+    )
+    gemini_base_url: str = Field(
+        default="https://generativelanguage.googleapis.com/v1beta",
+        validation_alias="GEMINI_BASE_URL",
+    )
     searxng_image_digest: str = Field(
         default="UNVERIFIED",
         pattern=r"^(UNVERIFIED|sha256:[0-9a-f]{64})$",

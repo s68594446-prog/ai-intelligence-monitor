@@ -43,3 +43,31 @@ def test_workflows_use_node24_action_majors():
     assert "actions/checkout@v5" in daily
     assert "actions/setup-python@v6" in daily
     assert "actions/upload-artifact@v6" in daily
+
+
+def test_daily_workflow_uses_gemini_without_deepseek_fallback():
+    steps = load_steps("daily-digest.yml")
+    analysis = next(step for step in steps if step.get("name", "").startswith("Run daily digest"))
+
+    assert "Gemini" in analysis["name"]
+    assert analysis["env"]["GEMINI_API_KEY"] == "${{ secrets.GEMINI_API_KEY }}"
+    assert "GEMINI_ANALYSIS_MODEL" in analysis["env"]
+    assert "GEMINI_BASE_URL" in analysis["env"]
+    assert "DEEPSEEK_API_KEY" not in analysis["env"]
+    assert analysis["run"].strip().startswith("python -m app.scripts.daily_global_ai")
+
+
+def test_env_probe_only_receives_gemini_configuration():
+    workflow = yaml.safe_load((WORKFLOWS_DIR / "env-probe.yml").read_text(encoding="utf-8"))
+    step = next(
+        step
+        for step in workflow["jobs"]["probe"]["steps"]
+        if step.get("name") == "Run environment probe"
+    )
+
+    assert set(step["env"]) == {
+        "GEMINI_API_KEY",
+        "GEMINI_ANALYSIS_MODEL",
+        "GEMINI_BASE_URL",
+    }
+    assert step["env"]["GEMINI_API_KEY"] == "${{ secrets.GEMINI_API_KEY }}"

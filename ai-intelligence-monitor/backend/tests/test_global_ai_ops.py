@@ -103,3 +103,30 @@ def test_valid_published_item_passes_global_ops():
 
     assert ops.passed
     assert not ops.offenders
+
+
+def test_attempted_but_unusable_analysis_provider_fails_digest_ops():
+    policy = load_source_policy(POLICY_PATH)
+
+    failed = check_global_channel(
+        analyses=[],
+        raw_text_by_url={},
+        digest_items=[],
+        policy=policy,
+        analysis_provider_required=True,
+        analysis_attempts=3,
+        provider_validated_outputs=0,
+    )
+    no_sources = check_global_channel(
+        analyses=[],
+        raw_text_by_url={},
+        digest_items=[],
+        policy=policy,
+        analysis_provider_required=True,
+        analysis_attempts=0,
+        provider_validated_outputs=0,
+    )
+
+    assert not failed.passed
+    assert failed.errors == ["analysis_provider_usable"]
+    assert no_sources.passed

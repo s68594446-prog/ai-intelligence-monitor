@@ -170,6 +170,9 @@ def check_global_channel(
     digest_items: list[dict],
     policy: WebSourcePolicy,
     discarded_evidence_failures: int = 0,
+    analysis_provider_required: bool = False,
+    analysis_attempts: int = 0,
+    provider_validated_outputs: int = 0,
 ) -> GlobalOpsResult:
     def evidence_tier_ok(url: str) -> bool:
         return classify_url(url, policy)[0] in {ClassifiedTier.T1, ClassifiedTier.T2}
@@ -234,6 +237,14 @@ def check_global_channel(
     for item in digest_items:
         sector_counts[item.get("sector", "?")] = sector_counts.get(item.get("sector", "?"), 0) + 1
     checks = {
+        # A truly empty news day remains legal.  But once fetched sources were
+        # sent for analysis, zero schema-validated provider outputs means the
+        # provider path was unusable; that must not masquerade as an empty day.
+        "analysis_provider_usable": (
+            not analysis_provider_required
+            or analysis_attempts == 0
+            or provider_validated_outputs > 0
+        ),
         "total_limit": len(digest_items) <= TOTAL_LIMIT,
         "sector_cap": all(count <= SECTOR_CAP for count in sector_counts.values()),
         "arxiv_quota": sum((urlsplit(item.get("url", "")).hostname or "").endswith("arxiv.org") for item in digest_items) <= 1,
@@ -263,5 +274,7 @@ def check_global_channel(
         stats={
             "analyses_accepted": len(analyses),
             "analyses_discarded_evidence_mismatch": discarded_evidence_failures,
+            "analysis_attempts": analysis_attempts,
+            "provider_validated_outputs": provider_validated_outputs,
         },
     )
