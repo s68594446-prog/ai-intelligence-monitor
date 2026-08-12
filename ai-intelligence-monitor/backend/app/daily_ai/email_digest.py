@@ -418,14 +418,19 @@ def deliver_latest(
     if not send:
         return {"status": "READY", "day": gate.day, "idempotency_key": key, "recipient_count": len(request.to_addresses), "dry_run": True}
 
-    ledger.append({"idempotency_key": key, "day": gate.day, "status": "PENDING", "recipient_count": len(request.to_addresses)})
+    tracking = {
+        "message_id": request.message_id,
+        "sender_domain": request.from_address.rsplit("@", 1)[1],
+    }
+    ledger.append({"idempotency_key": key, "day": gate.day, "status": "PENDING", "recipient_count": len(request.to_addresses), **tracking})
     try:
-        SMTPEmailDeliveryAdapter(settings).send(request)
+        provider_result = SMTPEmailDeliveryAdapter(settings).send(request)
     except Exception as exc:  # provider errors are bounded codes without credentials
         code = getattr(exc, "code", type(exc).__name__)
         unknown = getattr(exc, "outcome_unknown", False)
         status = "UNKNOWN" if unknown else "FAILED"
-        ledger.append({"idempotency_key": key, "day": gate.day, "status": status, "reason": code, "recipient_count": len(request.to_addresses)})
+        ledger.append({"idempotency_key": key, "day": gate.day, "status": status, "reason": code, "recipient_count": len(request.to_addresses), **tracking})
         return {"status": status, "day": gate.day, "idempotency_key": key, "reason": code, "recipient_count": len(request.to_addresses)}
-    ledger.append({"idempotency_key": key, "day": gate.day, "status": "SENT", "recipient_count": len(request.to_addresses)})
-    return {"status": "SENT", "day": gate.day, "idempotency_key": key, "recipient_count": len(request.to_addresses)}
+    accepted_at = datetime.now(timezone.utc).isoformat()
+    ledger.append({"idempotency_key": key, "day": gate.day, "status": "SENT", "recipient_count": len(request.to_addresses), "smtp_accepted_at": accepted_at, "provider_message_id": provider_result.provider_message_id, **tracking})
+    return {"status": "SENT", "day": gate.day, "idempotency_key": key, "recipient_count": len(request.to_addresses), "message_id": request.message_id, "smtp_accepted_at": accepted_at}

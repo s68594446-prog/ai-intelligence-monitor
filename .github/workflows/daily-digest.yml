@@ -6,7 +6,11 @@ on:
   workflow_dispatch:
     inputs:
       force:
-        description: "Bypass the same-day guard and regenerate. Content-keyed email idempotency still prevents an identical resend."
+        description: "Bypass the same-day guard and regenerate. This does not enable email delivery."
+        type: boolean
+        default: false
+      send_email:
+        description: "Actually send after Ops passes. Manual runs default to a full dry-run."
         type: boolean
         default: false
 
@@ -53,6 +57,13 @@ jobs:
           set +e   # we branch on the guard's decision, not on exit status
           DAY=$(TZ=Asia/Shanghai date +%F)
           echo "day=$DAY" >> "$GITHUB_OUTPUT"
+          SEND_EMAIL="${{ github.event_name == 'schedule' || inputs.send_email == true }}"
+          echo "send_email=$SEND_EMAIL" >> "$GITHUB_OUTPUT"
+          if [ "$SEND_EMAIL" != "true" ]; then
+            echo "Manual dry-run: bypassing the delivery ledger guard so the full pipeline can run without sending."
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           FORCE="${{ github.event.inputs.force }}"   # empty on schedule => not forced
           if [ "$FORCE" = "true" ]; then
             echo "FORCE=true: bypassing idempotency guard; full pipeline will run (may OVERWRITE archive and RE-SEND)."
@@ -178,6 +189,18 @@ jobs:
               echo '```'
             } >> "digests/${DAY}.md"
           fi
+      - name: Update published source history (URL and content hash only)
+        if: steps.guard.outputs.skip != 'true'
+        working-directory: ai-intelligence-monitor/backend
+        run: |
+          ARTIFACT=$(ls -d ../runs/*-daily-ai/published-source-history.json 2>/dev/null | tail -1)
+          if [ -z "$ARTIFACT" ]; then
+            echo "published source history artifact missing"
+            exit 1
+          fi
+          python -m app.scripts.update_digest_source_history \
+            --artifact "$ARTIFACT" \
+            --history ../../digests/.source-history.jsonl
       - name: Email the digest (Gate-checked; sends only if Ops passed)
         if: steps.guard.outputs.skip != 'true'
         working-directory: ai-intelligence-monitor/backend
@@ -190,19 +213,24 @@ jobs:
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           SMTP_FROM: ${{ secrets.SMTP_FROM }}
           SMTP_TO: ${{ secrets.SMTP_TO }}
-        # Any Gate block or SMTP failure is an automation failure. Do not turn a
-        # business-level BLOCKED result into a green GitHub run.
-        run: python -m app.scripts.send_digest_email --send
+        # Scheduled runs send. Manual runs default to READY dry-run and touch no
+        # SMTP server or send ledger unless send_email=true was explicit.
+        run: |
+          if [ "${{ steps.guard.outputs.send_email }}" = "true" ]; then
+            python -m app.scripts.send_digest_email --send
+          else
+            python -m app.scripts.send_digest_email
+          fi
       - name: Commit delivered digest and email ledger
-        if: steps.guard.outputs.skip != 'true'
+        if: steps.guard.outputs.skip != 'true' && steps.guard.outputs.send_email == 'true'
         run: |
           DAY=$(TZ=Asia/Shanghai date +%F)
-          if [ -z "$(git status --porcelain -- "digests/${DAY}.md" digests/.email-log.jsonl)" ]; then
+          if [ -z "$(git status --porcelain -- "digests/${DAY}.md" digests/.email-log.jsonl digests/.source-history.jsonl)" ]; then
             echo "no digest or ledger change"; exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add "digests/${DAY}.md" digests/.email-log.jsonl
+          git add "digests/${DAY}.md" digests/.email-log.jsonl digests/.source-history.jsonl
           git commit -m "digest: ${DAY} + email ledger"
           git pull --rebase origin main
           git push origin main

@@ -4,6 +4,7 @@ import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo
 
 import httpx
 import yaml
@@ -32,6 +33,7 @@ from app.daily_ai.ops import check_a_share_channel
 from app.daily_ai.pdf import SafeOfficialPdfFetcher
 from app.daily_ai.quality import check_text_quality, out_of_scope_headline
 from app.daily_ai.rss import RssDiscoveryAdapter, RssError
+from app.daily_ai.source_history import load_recent_source_history
 from app.pipeline.errors import LLMAdapterTimeout, LLMOutputValidationError, LLMProviderError
 from app.scripts.daily_a_share_ai import KEYWORDS as A_SHARE_KEYWORDS
 from app.scripts.daily_a_share_ai import SITES as A_SHARE_SITES
@@ -51,6 +53,8 @@ SOURCE_POLICY_PATH = CONFIG_DIR / "daily_ai_source_policy.yaml"
 RSS_SOURCES_PATH = CONFIG_DIR / "rss_sources.yaml"
 KEYWORDS_PATH = CONFIG_DIR / "industry_keywords.yaml"
 PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts/daily_global_ai_analysis_v8.txt"
+PROJECT_DIR = Path(__file__).resolve().parents[3]
+SOURCE_HISTORY_PATH = PROJECT_DIR.parent / "digests/.source-history.jsonl"
 FETCH_MAX_BYTES = 5_000_000
 # A T1 page we cannot fetch (403 / access challenge) may still be reachable
 # through a T2 retelling of the SAME event cluster. That substitute is fetched
@@ -179,6 +183,11 @@ def run():
     args = _args()
     settings = Settings()
     now = datetime.now(timezone.utc)
+    report_day = now.astimezone(ZoneInfo("Asia/Shanghai")).date()
+    source_history = load_recent_source_history(
+        SOURCE_HISTORY_PATH,
+        current_day=report_day,
+    )
     run_id = now.strftime("%Y%m%dT%H%M%SZ") + "-daily-ai"
     run_dir = settings.runs_dir / run_id
     run_dir.mkdir(parents=True, exist_ok=False)
@@ -195,6 +204,12 @@ def run():
         "query_count": len(queries), "budgets": {"max_queries": args.max_queries, "max_results": args.max_results, "max_fetch": args.max_fetch, "max_analyze": args.max_analyze},
         "queries": [q.model_dump(mode="json") for q in queries],
         "stages": {"discover": args.discover, "rss": args.rss, "juhe": args.juhe, "fetch": args.fetch, "analyze": args.analyze, "render": args.render, "a_share": args.a_share},
+        "source_history": {
+            "path": str(SOURCE_HISTORY_PATH),
+            "records_loaded": source_history.records_loaded,
+            "malformed_lines": source_history.malformed_lines,
+            "window_days": 3,
+        },
     })
     if not (args.discover or args.rss):
         print(json.dumps({"run_id": run_id, "status": "PLANNED", "plan": len(queries), "network_calls": 0, "gemini_calls": 0}, sort_keys=True))
@@ -314,9 +329,13 @@ def run():
     })
 
     sources, blocked, analyses, analysis_failures = [], [], [], []
+    cross_day_duplicates = []
     analysis_urls: dict[str, str] = {}
     analyze_attempts = 0
     provider_validated_outputs = 0
+    provider_request_attempts = 0
+    provider_halted = False
+    provider_budget_exhausted = False
     if args.fetch:
         fetch_client = httpx.Client(timeout=settings.web_search_timeout_seconds, follow_redirects=False, trust_env=False)
         fetcher = WebPageFetcher(client=fetch_client, max_bytes=FETCH_MAX_BYTES, max_retries=0, minimum_interval_seconds=1)
@@ -334,6 +353,7 @@ def run():
                     prompt_path=PROMPT_PATH,
                     timeout_seconds=settings.llm_timeout_seconds,
                     max_retries=settings.llm_max_retries,
+                    max_provider_requests=args.max_analyze,
                 )
             except ValueError:
                 analyzer_error = {
@@ -363,10 +383,32 @@ def run():
                 if result.status.value != "SUCCESS":
                     blocked.append({"url": candidate.canonical_url, "tier": candidate.source_tier.value, "status": result.status.value, "error_code": result.error_code})
                     continue
-                sources.append({"url": candidate.canonical_url, "tier": candidate.source_tier.value, "title": result.title or candidate.title, "sha256": result.response_sha256, "raw_text": result.raw_text})
-                # Budget counts Gemini attempts (quota), not accepted results:
-                # a discarded article must not buy a free extra call.
-                if args.analyze and analyze_attempts < args.max_analyze:
+                sources.append({"url": candidate.canonical_url, "tier": candidate.source_tier.value, "title": result.title or candidate.title, "sha256": result.response_sha256, "content_sha256": result.content_hash, "raw_text": result.raw_text})
+                # Compare the safely fetched text hash with the committed
+                # three-day publication history before spending Gemini quota.
+                # A changed page is analyzed normally; only the same canonical
+                # URL with the same content hash is skipped.
+                if source_history.has_same_content(
+                    candidate.canonical_url,
+                    result.content_hash,
+                ):
+                    cross_day_duplicates.append(
+                        {
+                            "url": candidate.canonical_url,
+                            "content_sha256": result.content_hash,
+                            "reason_code": "CROSS_DAY_SAME_URL_AND_CONTENT",
+                        }
+                    )
+                    continue
+                # The adapter enforces max_analyze against actual HTTP requests,
+                # including retries. This counter tracks candidate-level calls
+                # for Ops; a discarded article never buys a free extra request.
+                if (
+                    args.analyze
+                    and not provider_halted
+                    and analyze_attempts < args.max_analyze
+                    and (analyzer is None or analyzer.request_count < args.max_analyze)
+                ):
                     analyze_attempts += 1
                     if analyzer is None:
                         analysis_failures.append({
@@ -376,6 +418,7 @@ def run():
                                 "reason_code": "GEMINI_CONFIGURATION_ERROR"
                             },
                         })
+                        provider_halted = True
                         continue
                     # Fail-soft: any single-article failure is discarded with an
                     # audit record and the run continues. Nothing here may abort
@@ -425,17 +468,25 @@ def run():
                             analysis_urls[str(analysis.evidence[0].source_url)] = candidate.candidate_id
                     except EvidenceMismatch as exc:
                         analysis_failures.append({"url": candidate.canonical_url, "error_code": "EVIDENCE_MISMATCH", "diagnostics": exc.diagnostics})
-                    except (AnalysisOutputError, ProviderCallError) as exc:
+                    except AnalysisOutputError as exc:
                         analysis_failures.append({"url": candidate.canonical_url, "error_code": exc.diagnostics.get("reason_code", type(exc).__name__), "diagnostics": exc.diagnostics})
+                    except ProviderCallError as exc:
+                        analysis_failures.append({"url": candidate.canonical_url, "error_code": exc.diagnostics.get("reason_code", type(exc).__name__), "diagnostics": exc.diagnostics})
+                        if exc.diagnostics.get("halt_provider_for_run"):
+                            provider_halted = True
                     except (LLMOutputValidationError, LLMAdapterTimeout, LLMProviderError) as exc:
                         analysis_failures.append({"url": candidate.canonical_url, "error_code": type(exc).__name__, "detail": str(exc)[:300]})
                     except Exception as exc:  # absolute fail-soft guard
                         analysis_failures.append({"url": candidate.canonical_url, "error_code": f"UNEXPECTED_{type(exc).__name__}", "detail": str(exc)[:300]})
         finally:
             if analyzer is not None:
+                provider_request_attempts = analyzer.request_count
+                provider_budget_exhausted = (
+                    analyzer.request_count >= args.max_analyze
+                )
                 analyzer.close()
             fetch_client.close()
-    _write(run_dir / "02-fetch.json", {"run_id": run_id, "fetched": [{k: v for k, v in item.items() if k != "raw_text"} for item in sources], "blocked": blocked})
+    _write(run_dir / "02-fetch.json", {"run_id": run_id, "fetched": [{k: v for k, v in item.items() if k != "raw_text"} for item in sources], "blocked": blocked, "cross_day_duplicates": cross_day_duplicates})
     _write(run_dir / "03-analysis-output.json", [item.model_dump(mode="json") for item in analyses])
     _write(run_dir / "analysis-failures.json", analysis_failures)
 
@@ -452,6 +503,21 @@ def run():
         if args.a_share:
             digest_text += "\n\n" + render_a_share_section(a_share_items)
         (run_dir / "04-digest.txt").write_text(digest_text + "\n", encoding="utf-8")
+    content_hash_by_url = {
+        item["url"]: item.get("content_sha256") for item in sources
+    }
+    _write(
+        run_dir / "published-source-history.json",
+        [
+            {
+                "day": report_day.isoformat(),
+                "canonical_url": item["url"],
+                "content_sha256": content_hash_by_url[item["url"]],
+            }
+            for item in digest_items
+            if content_hash_by_url.get(item["url"])
+        ],
+    )
     raw_by_url = {item["url"]: item["raw_text"] for item in sources}
     ops = check_global_channel(
         analyses=analyses, raw_text_by_url=raw_by_url, digest_items=digest_items, policy=policy,
@@ -474,8 +540,12 @@ def run():
         "fetch_plan": {"global": len([c for c in fetch_plan if c in global_pool]), "china": len([c for c in fetch_plan if c in cn_pool]), "arxiv": len([c for c in fetch_plan if c in arxiv_pool])},
         "fetched": len(sources), "blocked": len(blocked),
         "analyze_attempts": analyze_attempts, "analyzed": len(analyses),
+        "provider_request_attempts": provider_request_attempts,
+        "provider_halted": provider_halted,
+        "provider_budget_exhausted": provider_budget_exhausted,
         "provider_validated_outputs": provider_validated_outputs,
         "analysis_failures": len(analysis_failures), "digest_items": len(digest_items),
+        "cross_day_duplicates_skipped": len(cross_day_duplicates),
         "ops_passed": ops.passed,
         **a_share_counts,
     }

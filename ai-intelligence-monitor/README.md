@@ -164,6 +164,8 @@ Phase 3C is additive and does not write the frozen DRAM/HBM Run, Signal, Adjudic
 
 Phase 3C reads `GEMINI_API_KEY`, `GEMINI_ANALYSIS_MODEL`, and `GEMINI_BASE_URL`. The default analysis model is the stable `gemini-3.5-flash`; an operator may explicitly select `gemini-3.5-flash-lite` through `GEMINI_ANALYSIS_MODEL`. The free tier is quota-limited, is not described or treated as unlimited, and no paid or DeepSeek fallback occurs on exhaustion. The v8 system instruction remains `backend/app/prompts/daily_global_ai_analysis_v8.txt`. Requests contain only the safely fetched source text, URL, and bounded metadata; Search Grounding and all other Gemini tools are disabled.
 
+Transient Gemini 429/5xx responses receive bounded retries with short capped backoff while the configured per-run HTTP request budget remains authoritative. A final 429 records only allowlisted quota identifiers/status and stops further Gemini calls for that run, preventing a free-tier limit from producing dozens of guaranteed failures. It never changes models automatically. Safely fetched sources are compared with the committed three-day `digests/.source-history.jsonl`; Gemini is skipped only when both canonical URL and content SHA-256 match, while changed content at the same URL remains eligible. The history contains no raw text.
+
 Digest publication and email are fail-closed:
 
 - A source-tier/model-label mismatch is rejected per item as `SOURCING_TIER_MISMATCH` and retained in `analysis-failures.json`; one rejected unpublished analysis cannot block otherwise valid items.
@@ -173,6 +175,8 @@ Digest publication and email are fail-closed:
 - Only an Ops-passed digest is staged, email-gated, sent, and then committed together with its email ledger update.
 - Any email Gate block or SMTP failure makes the workflow fail instead of being reported as a green run.
 
-The day-level ledger guard prevents ordinary scheduled duplicates, and the delivery service also uses a day/content/recipient idempotency key. The separate manual `email-digest.yml` workflow remains available for Gate dry-runs or controlled delivery attempts against an already committed digest; the same idempotency key still prevents an identical resend. SMTP and provider credentials remain GitHub Secrets or local ignored environment values and are never written to digest artifacts.
+The day-level ledger guard prevents ordinary scheduled duplicates, and the delivery service also uses a day/content/recipient idempotency key. Manual dispatch of `daily-digest.yml` defaults to a complete discovery/fetch/Gemini/render/Ops dry-run with `send_email=false`; it does not contact SMTP, append the send ledger, or commit generated files. Scheduled runs continue to send, and a manual send requires explicit `send_email=true`. The separate manual `email-digest.yml` workflow remains available for Gate dry-runs or controlled delivery attempts against an already committed digest. SMTP and provider credentials remain GitHub Secrets or local ignored environment values and are never written to digest artifacts. Successful send-ledger rows retain only a deterministic Message-ID, sender domain, acceptance timestamp, idempotency key, and recipient count for delivery troubleshooting; recipient addresses are not stored.
+
+`.github/workflows/backend-ci.yml` runs the complete offline backend test suite on relevant pushes and pull requests with provider credentials forced empty. It never performs discovery, Gemini calls, or email delivery.
 
 The HTML alternative is a self-contained, table-based 660px intelligence brief with inline CSS and clickable source links. It contains no external images, fonts, scripts, remote CSS, tracking pixels, or audit appendix; the original plain-text alternative is unchanged.

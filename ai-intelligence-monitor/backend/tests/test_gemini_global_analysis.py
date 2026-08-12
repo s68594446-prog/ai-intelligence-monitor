@@ -64,14 +64,17 @@ def response_for(output: dict | str, *, finish_reason: str = "STOP") -> dict:
     }
 
 
-def adapter(handler) -> GeminiGlobalAiAnalysisAdapter:
+def adapter(handler, **kwargs) -> GeminiGlobalAiAnalysisAdapter:
     return GeminiGlobalAiAnalysisAdapter(
         api_key=SecretStr(API_KEY),
         base_url="https://generativelanguage.googleapis.com/v1beta",
         model="gemini-3.5-flash",
         prompt_path=PROMPT_PATH,
         timeout_seconds=1,
-        max_retries=0,
+        max_retries=kwargs.pop("max_retries", 0),
+        sleep_fn=kwargs.pop("sleep_fn", lambda _: None),
+        random_fn=kwargs.pop("random_fn", lambda: 0),
+        **kwargs,
         client=httpx.Client(transport=httpx.MockTransport(handler)),
     )
 
@@ -153,8 +156,107 @@ def test_gemini_timeout_is_distinct_and_secret_free():
     with pytest.raises(ProviderCallError) as caught:
         adapter(handler).analyze(metadata={}, raw_text=RAW_TEXT, source_url=SOURCE_URL)
 
-    assert caught.value.diagnostics == {"reason_code": "GEMINI_TIMEOUT"}
+    assert caught.value.diagnostics == {
+        "reason_code": "GEMINI_TIMEOUT",
+        "request_attempts": 1,
+    }
     assert API_KEY not in repr(caught.value)
+
+
+@pytest.mark.parametrize("first_status", [429, 503])
+def test_gemini_retries_bounded_transient_http_failures(first_status):
+    statuses = [first_status, 200]
+    sleeps = []
+
+    def handler(request):
+        status = statuses.pop(0)
+        if status == 200:
+            return httpx.Response(200, json=response_for(valid_output()))
+        return httpx.Response(status, headers={"Retry-After": "0"}, json={})
+
+    analyzer = adapter(
+        handler,
+        max_retries=2,
+        max_provider_requests=3,
+        sleep_fn=sleeps.append,
+    )
+
+    result = analyzer.analyze(metadata={}, raw_text=RAW_TEXT, source_url=SOURCE_URL)
+
+    assert isinstance(result, GlobalAiAnalysisContract)
+    assert analyzer.request_count == 2
+    assert sleeps == [0.0]
+
+
+def test_gemini_final_429_exposes_only_safe_quota_metadata_and_halts_run():
+    body = {
+        "error": {
+            "status": "RESOURCE_EXHAUSTED",
+            "message": API_KEY,
+            "details": [
+                {
+                    "violations": [
+                        {"quotaId": "GenerateRequestsPerDayPerProjectPerModel-FreeTier"}
+                    ]
+                }
+            ],
+        }
+    }
+    analyzer = adapter(
+        lambda request: httpx.Response(
+            429, headers={"Retry-After": "0"}, json=body
+        ),
+        max_retries=1,
+        max_provider_requests=2,
+    )
+
+    with pytest.raises(ProviderCallError) as caught:
+        analyzer.analyze(metadata={}, raw_text=RAW_TEXT, source_url=SOURCE_URL)
+
+    diagnostics = caught.value.diagnostics
+    assert diagnostics["reason_code"] == "GEMINI_RATE_LIMITED"
+    assert diagnostics["request_attempts"] == 2
+    assert diagnostics["provider_requests_total"] == 2
+    assert diagnostics["halt_provider_for_run"] is True
+    assert diagnostics["provider_status"] == "RESOURCE_EXHAUSTED"
+    assert diagnostics["quota_ids"] == [
+        "GenerateRequestsPerDayPerProjectPerModel-FreeTier"
+    ]
+    assert_no_key(diagnostics)
+
+
+def test_gemini_never_exceeds_explicit_provider_request_budget():
+    analyzer = adapter(
+        lambda request: httpx.Response(503, json={}),
+        max_retries=2,
+        max_provider_requests=1,
+    )
+
+    with pytest.raises(ProviderCallError) as caught:
+        analyzer.analyze(metadata={}, raw_text=RAW_TEXT, source_url=SOURCE_URL)
+
+    assert analyzer.request_count == 1
+    assert caught.value.diagnostics["reason_code"] == "GEMINI_SERVER_ERROR"
+    assert caught.value.diagnostics["request_attempts"] == 1
+
+
+def test_gemini_does_not_sleep_through_long_retry_after_window():
+    sleeps = []
+    analyzer = adapter(
+        lambda request: httpx.Response(
+            429, headers={"Retry-After": "60"}, json={}
+        ),
+        max_retries=2,
+        sleep_fn=sleeps.append,
+    )
+
+    with pytest.raises(ProviderCallError) as caught:
+        analyzer.analyze(metadata={}, raw_text=RAW_TEXT, source_url=SOURCE_URL)
+
+    assert analyzer.request_count == 1
+    assert sleeps == []
+    assert caught.value.diagnostics["retry_after_seconds"] == 60.0
+    assert caught.value.diagnostics["halt_provider_for_run"] is True
 
 
 @pytest.mark.parametrize(

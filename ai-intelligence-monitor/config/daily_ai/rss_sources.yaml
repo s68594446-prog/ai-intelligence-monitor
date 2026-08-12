@@ -31,7 +31,9 @@ feeds:
   - {name: wallstreetcn, url: 'https://dedicated.wallstreetcn.com/rss.xml', max_items: 15, prefilter: true}
   - {name: dramexchange, url: 'https://www.dramexchange.com/rss.xml', max_items: 5, prefilter: false}
   - {name: qbitai, url: 'https://www.qbitai.com/feed', max_items: 8, prefilter: true}
-  - {name: kr36, url: 'https://36kr.com/feed', max_items: 10, prefilter: true}
+  # 36Kr /feed returned non-XML content on three consecutive production runs
+  # (2026-08-10 through 2026-08-12). Keep it disabled until a valid official
+  # feed endpoint is verified; do not treat an HTML error page as discovery.
   - {name: leiphone, url: 'https://www.leiphone.com/feed', max_items: 8, prefilter: true}
   - {name: infoq_cn, url: 'https://www.infoq.cn/feed', max_items: 5, prefilter: true}
   # Chinese hardware/industry coverage added 2026-07-26 (probe-verified 200 +

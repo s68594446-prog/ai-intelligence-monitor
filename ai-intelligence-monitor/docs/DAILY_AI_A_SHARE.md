@@ -69,9 +69,13 @@ explicit configuration option, not an automatic fallback. The API key is sent
 only in the `x-goog-api-key` header. Search Grounding and all other tools are
 absent from the request, and Gemini output must still pass the existing
 Pydantic, exact quote/URL, numeric citation, Source Tier, advice-language,
-market-action, and Digest Ops checks. A 429 or any other Gemini failure remains
-an audited fail-soft item failure and never switches to DeepSeek or a paid
-model automatically.
+market-action, and Digest Ops checks. Transient 429/5xx responses receive
+bounded, request-budget-aware retries. A final 429 is recorded with allowlisted
+quota metadata and halts further Gemini calls for that run instead of burning
+the rest of the free-tier budget. It never switches to DeepSeek or a paid model
+automatically. Published canonical URLs and content SHA-256 values are retained
+for three-day cross-run deduplication; raw source text is not retained in that
+history, and changed content at the same URL remains eligible for analysis.
 
 An absent or failed Digest Ops result is an automation failure: the artifact is
 retained for diagnosis, while repository publication and SMTP delivery are both
@@ -79,3 +83,9 @@ blocked. An Ops-passed digest is sent through the separate digest email gate;
 only after successful delivery are the digest and append-only email ledger
 committed together. A blocked Gate or SMTP failure must be visible as a failed
 GitHub run, not normalized to a green workflow.
+
+Scheduled runs send after Ops passes. A manual `daily-digest.yml` dispatch
+defaults to `send_email=false`: it executes the complete pipeline but performs
+only the email Gate dry-run, writes no send-ledger row, and commits nothing.
+`backend-ci.yml` separately runs the offline backend suite on relevant pushes
+and pull requests without provider credentials.

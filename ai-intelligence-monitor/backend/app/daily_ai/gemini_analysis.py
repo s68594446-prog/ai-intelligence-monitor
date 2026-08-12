@@ -7,7 +7,11 @@ and exact-evidence validation.
 """
 
 import json
+import random
 import re
+import time
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from urllib.parse import quote, urlsplit
 
@@ -29,6 +33,8 @@ from app.daily_ai.global_contracts import (
 
 OFFICIAL_GEMINI_HOST = "generativelanguage.googleapis.com"
 MODEL_NAME = re.compile(r"^[A-Za-z0-9._-]+$")
+SAFE_PROVIDER_CODE = re.compile(r"^[A-Za-z0-9_.-]{1,120}$")
+MAX_RETRY_DELAY_SECONDS = 10.0
 
 # The GenerateContent API supports a documented subset of JSON Schema.  Keys
 # omitted here remain enforced by Pydantic after generation; for example the
@@ -100,6 +106,52 @@ def _safe_usage(response: dict) -> dict:
     return {key: usage[key] for key in allowed if key in usage}
 
 
+def _retry_after_seconds(response: httpx.Response) -> float | None:
+    value = response.headers.get("retry-after", "").strip()
+    if not value:
+        return None
+    try:
+        return max(0.0, float(value))
+    except ValueError:
+        try:
+            retry_at = parsedate_to_datetime(value)
+        except (TypeError, ValueError):
+            return None
+        if retry_at.tzinfo is None:
+            retry_at = retry_at.replace(tzinfo=timezone.utc)
+        return max(0.0, (retry_at - datetime.now(timezone.utc)).total_seconds())
+
+
+def _safe_provider_diagnostics(response: httpx.Response) -> dict:
+    """Extract allowlisted quota metadata without provider messages or secrets."""
+
+    result: dict = {}
+    retry_after = _retry_after_seconds(response)
+    if retry_after is not None:
+        result["retry_after_seconds"] = round(retry_after, 3)
+    try:
+        envelope = response.json()
+    except ValueError:
+        return result
+    error = envelope.get("error") if isinstance(envelope, dict) else None
+    if not isinstance(error, dict):
+        return result
+    status = error.get("status")
+    if isinstance(status, str) and SAFE_PROVIDER_CODE.fullmatch(status):
+        result["provider_status"] = status
+    quota_ids: set[str] = set()
+    for detail in error.get("details") or []:
+        if not isinstance(detail, dict):
+            continue
+        for violation in detail.get("violations") or []:
+            quota_id = violation.get("quotaId") if isinstance(violation, dict) else None
+            if isinstance(quota_id, str) and SAFE_PROVIDER_CODE.fullmatch(quota_id):
+                quota_ids.add(quota_id)
+    if quota_ids:
+        result["quota_ids"] = sorted(quota_ids)[:5]
+    return result
+
+
 class GeminiGlobalAiAnalysisAdapter:
     name = "GeminiGlobalAiAnalysisAdapter"
     version = "gemini-global-ai-v1"
@@ -114,6 +166,9 @@ class GeminiGlobalAiAnalysisAdapter:
         prompt_path: Path,
         timeout_seconds: float = 60,
         max_retries: int = 2,
+        max_provider_requests: int | None = None,
+        sleep_fn=time.sleep,
+        random_fn=random.random,
         client: httpx.Client | None = None,
     ):
         key = api_key.get_secret_value() if isinstance(api_key, SecretStr) else api_key
@@ -131,6 +186,10 @@ class GeminiGlobalAiAnalysisAdapter:
             raise ValueError("GEMINI_BASE_URL must be an HTTPS Gemini API URL")
         if not MODEL_NAME.fullmatch(model):
             raise ValueError("GEMINI_ANALYSIS_MODEL is invalid")
+        if not 0 <= max_retries <= 5:
+            raise ValueError("max_retries must be between 0 and 5")
+        if max_provider_requests is not None and max_provider_requests < 1:
+            raise ValueError("max_provider_requests must be positive")
 
         self.model = model
         self.endpoint = (
@@ -146,9 +205,14 @@ class GeminiGlobalAiAnalysisAdapter:
             "x-goog-api-client": "ai-intelligence-monitor/phase3c",
         }
         self._owns_client = client is None
+        self.max_retries = max_retries
+        self.max_provider_requests = max_provider_requests
+        self.request_count = 0
+        self._sleep = sleep_fn
+        self._random = random_fn
         self.client = client or httpx.Client(
             timeout=timeout_seconds,
-            transport=httpx.HTTPTransport(retries=max_retries),
+            transport=httpx.HTTPTransport(retries=0),
             trust_env=False,
         )
 
@@ -193,29 +257,77 @@ class GeminiGlobalAiAnalysisAdapter:
         raw_text: str,
         source_url: str,
     ) -> GlobalAiAnalysisContract:
-        try:
-            response = self.client.post(
-                self.endpoint,
-                headers=self._headers,
-                json=self._payload(
-                    metadata=metadata,
-                    raw_text=raw_text,
-                    source_url=source_url,
-                ),
+        payload = self._payload(
+            metadata=metadata,
+            raw_text=raw_text,
+            source_url=source_url,
+        )
+        response = None
+        request_attempts = 0
+        for retry_number in range(self.max_retries + 1):
+            if (
+                self.max_provider_requests is not None
+                and self.request_count >= self.max_provider_requests
+            ):
+                raise ProviderCallError(
+                    "Gemini request budget exhausted",
+                    diagnostics={
+                        "reason_code": "GEMINI_REQUEST_BUDGET_EXHAUSTED",
+                        "request_attempts": request_attempts,
+                        "provider_requests_total": self.request_count,
+                        "halt_provider_for_run": True,
+                    },
+                )
+            self.request_count += 1
+            request_attempts += 1
+            try:
+                response = self.client.post(
+                    self.endpoint,
+                    headers=self._headers,
+                    json=payload,
+                )
+            except (httpx.TimeoutException, TimeoutError) as exc:
+                raise ProviderCallError(
+                    "Gemini analysis timed out",
+                    diagnostics={
+                        "reason_code": "GEMINI_TIMEOUT",
+                        "request_attempts": request_attempts,
+                    },
+                ) from exc
+            except httpx.RequestError as exc:
+                raise ProviderCallError(
+                    "Gemini analysis network error",
+                    diagnostics={
+                        "reason_code": "GEMINI_NETWORK_ERROR",
+                        "error_type": type(exc).__name__,
+                        "request_attempts": request_attempts,
+                    },
+                ) from exc
+
+            retryable = response.status_code == 429 or response.status_code >= 500
+            retry_after = _retry_after_seconds(response)
+            retry_delay_too_long = (
+                retry_after is not None and retry_after > MAX_RETRY_DELAY_SECONDS
             )
-        except (httpx.TimeoutException, TimeoutError) as exc:
-            raise ProviderCallError(
-                "Gemini analysis timed out",
-                diagnostics={"reason_code": "GEMINI_TIMEOUT"},
-            ) from exc
-        except httpx.RequestError as exc:
-            raise ProviderCallError(
-                "Gemini analysis network error",
-                diagnostics={
-                    "reason_code": "GEMINI_NETWORK_ERROR",
-                    "error_type": type(exc).__name__,
-                },
-            ) from exc
+            budget_remaining = (
+                self.max_provider_requests is None
+                or self.request_count < self.max_provider_requests
+            )
+            if (
+                response.status_code == 200
+                or not retryable
+                or retry_number >= self.max_retries
+                or retry_delay_too_long
+                or not budget_remaining
+            ):
+                break
+            delay = retry_after
+            if delay is None:
+                delay = min(2**retry_number, MAX_RETRY_DELAY_SECONDS)
+                delay += min(max(float(self._random()), 0.0), 1.0) * 0.25
+            self._sleep(delay)
+
+        assert response is not None
 
         if response.status_code != 200:
             if response.status_code == 429:
@@ -228,11 +340,23 @@ class GeminiGlobalAiAnalysisAdapter:
                 reason_code = "GEMINI_SERVER_ERROR"
             else:
                 reason_code = "GEMINI_HTTP_ERROR"
+            budget_exhausted = (
+                self.max_provider_requests is not None
+                and self.request_count >= self.max_provider_requests
+            )
             raise ProviderCallError(
                 "Gemini analysis provider error",
                 diagnostics={
                     "reason_code": reason_code,
                     "status_code": response.status_code,
+                    "request_attempts": request_attempts,
+                    "provider_requests_total": self.request_count,
+                    # After bounded 429 retries, further calls in this run are
+                    # stopped. This avoids turning a per-minute or per-day free
+                    # tier limit into dozens of guaranteed failed requests.
+                    "halt_provider_for_run": response.status_code == 429
+                    or budget_exhausted,
+                    **_safe_provider_diagnostics(response),
                 },
             )
 

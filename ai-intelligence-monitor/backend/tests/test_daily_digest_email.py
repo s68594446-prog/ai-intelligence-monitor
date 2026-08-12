@@ -1,6 +1,11 @@
+import json
 import re
 
-from app.daily_ai.email_digest import parse_digest_sections, render_bodies
+from pydantic import SecretStr
+
+from app.core.settings import Settings
+from app.daily_ai.email_digest import deliver_latest, parse_digest_sections, render_bodies
+from app.delivery.contracts import EmailProviderResult
 
 
 SECTORS = [
@@ -112,3 +117,58 @@ def test_empty_digest_renders_zero_counts_without_fabricated_item():
     assert "今日无达到标准的产业链重点新闻" in html
     assert re.search(r">0 <span[^>]*>条</span>", html)
     assert re.search(r">0 <span[^>]*>个</span>", html)
+
+
+def test_sent_ledger_records_message_id_domain_and_acceptance_without_addresses(
+    tmp_path, monkeypatch
+):
+    digest = tmp_path / "2026-08-12.md"
+    digest.write_text(
+        sample_digest() + '\n\n---\n## 审计\n### ops.json\n```json\n{"passed": true}\n```\n',
+        encoding="utf-8",
+    )
+    settings = Settings(
+        _env_file=None,
+        EMAIL_DELIVERY_ENABLED=True,
+        SMTP_HOST="smtp.example.com",
+        SMTP_PORT=587,
+        SMTP_USERNAME="sender@example.com",
+        SMTP_PASSWORD=SecretStr("secret"),
+        SMTP_FROM="sender@example.com",
+        SMTP_TO="first@example.net,second@example.net",
+    )
+
+    class FakeSMTP:
+        def __init__(self, settings):
+            pass
+
+        def send(self, request):
+            return EmailProviderResult(provider_message_id=request.message_id)
+
+    monkeypatch.setattr(
+        "app.daily_ai.email_digest.SMTPEmailDeliveryAdapter", FakeSMTP
+    )
+
+    result = deliver_latest(
+        settings,
+        digests_dir=tmp_path,
+        ledger_path=tmp_path / ".email-log.jsonl",
+        send=True,
+    )
+    entries = [
+        json.loads(line)
+        for line in (tmp_path / ".email-log.jsonl").read_text(
+            encoding="utf-8"
+        ).splitlines()
+    ]
+
+    assert result["status"] == "SENT"
+    assert result["message_id"].startswith("<aim-digest-")
+    assert entries[-1]["message_id"] == result["message_id"]
+    assert entries[-1]["provider_message_id"] == result["message_id"]
+    assert entries[-1]["sender_domain"] == "example.com"
+    assert entries[-1]["smtp_accepted_at"]
+    serialized = json.dumps(entries)
+    assert "first@example.net" not in serialized
+    assert "second@example.net" not in serialized
+    assert "secret" not in serialized
