@@ -20,10 +20,11 @@ from app.daily_ai.global_analysis import (
     ProviderCallError,
 )
 from app.daily_ai.global_digest import render_global_digest, select_global_digest
-from app.daily_ai.gemini_analysis import GeminiGlobalAiAnalysisAdapter
+from app.daily_ai.gemini_analysis import GeminiGlobalAiAnalysisAdapter, GeminiRequestGovernor
 from app.daily_ai.global_ops import (
     advice_violations,
     check_global_channel,
+    neutrality_violations,
     numeric_claim_cited,
     sourcing_matches_tier,
     sourcing_tier_diagnostics,
@@ -34,6 +35,10 @@ from app.daily_ai.pdf import SafeOfficialPdfFetcher
 from app.daily_ai.quality import check_text_quality, out_of_scope_headline
 from app.daily_ai.rss import RssDiscoveryAdapter, RssError
 from app.daily_ai.source_history import load_recent_source_history
+from app.daily_ai.us_macro_discovery import (
+    MacroDiscoveryError,
+    TreasuryPressReleaseDiscoveryAdapter,
+)
 from app.pipeline.errors import LLMAdapterTimeout, LLMOutputValidationError, LLMProviderError
 from app.scripts.daily_a_share_ai import KEYWORDS as A_SHARE_KEYWORDS
 from app.scripts.daily_a_share_ai import SITES as A_SHARE_SITES
@@ -52,7 +57,8 @@ QUERY_PLAN_PATH = CONFIG_DIR / "cn_ai_queries.yaml"
 SOURCE_POLICY_PATH = CONFIG_DIR / "daily_ai_source_policy.yaml"
 RSS_SOURCES_PATH = CONFIG_DIR / "rss_sources.yaml"
 KEYWORDS_PATH = CONFIG_DIR / "industry_keywords.yaml"
-PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts/daily_global_ai_analysis_v8.txt"
+PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts/daily_global_ai_analysis_v9.txt"
+MACRO_PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts/daily_us_macro_analysis_v1.txt"
 PROJECT_DIR = Path(__file__).resolve().parents[3]
 SOURCE_HISTORY_PATH = PROJECT_DIR.parent / "digests/.source-history.jsonl"
 FETCH_MAX_BYTES = 5_000_000
@@ -72,6 +78,23 @@ def load_industry_keywords() -> list[str]:
 # event's actors, never by the article's origin.
 CHINA_FETCH_SHARE = 0.5
 ARXIV_FETCH_CAP = 3
+MACRO_FETCH_CAP = 4
+MACRO_ANALYZE_CAP = 4
+DOMAIN_FETCH_CAP = 6
+US_MACRO_DOMAINS = {
+    "home.treasury.gov",
+    "treasurydirect.gov",
+    "federalreserve.gov",
+}
+PUBLISHER_SUFFIXES = {
+    "nvidia.com",
+    "google.com",
+    "microsoft.com",
+    "openai.com",
+    "treasury.gov",
+    "federalreserve.gov",
+    "treasurydirect.gov",
+}
 CN_BOARD_DOMAINS = {
     "36kr.com", "qbitai.com", "jiqizhixin.com", "leiphone.com", "caixin.com",
     "baidu.com", "aliyun.com", "tencent.com", "bytedance.com", "volcengine.com",
@@ -82,6 +105,44 @@ CN_BOARD_DOMAINS = {
 def _is_cn_domain(domain: str) -> bool:
     host = domain.casefold()
     return host.endswith(".cn") or any(host == d or host.endswith("." + d) for d in CN_BOARD_DOMAINS)
+
+
+def _is_us_macro_domain(domain: str) -> bool:
+    host = domain.casefold()
+    return any(host == value or host.endswith("." + value) for value in US_MACRO_DOMAINS)
+
+
+def _publisher_key(domain: str) -> str:
+    host = domain.casefold().strip(".")
+    return next(
+        (suffix for suffix in PUBLISHER_SUFFIXES if host == suffix or host.endswith("." + suffix)),
+        host,
+    )
+
+
+def _take_domain_diverse(
+    candidates: list,
+    limit: int,
+    *,
+    cap: int = DOMAIN_FETCH_CAP,
+    existing: list | None = None,
+) -> list:
+    """Bound one publisher without changing source-tier or evidence rules."""
+
+    selected = []
+    counts: dict[str, int] = {}
+    for item in existing or []:
+        domain = _publisher_key(item.source_domain)
+        counts[domain] = counts.get(domain, 0) + 1
+    for item in candidates:
+        domain = _publisher_key(item.source_domain)
+        if counts.get(domain, 0) >= cap:
+            continue
+        selected.append(item)
+        counts[domain] = counts.get(domain, 0) + 1
+        if len(selected) >= limit:
+            break
+    return selected
 
 def _write(path: Path, value):
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
@@ -240,6 +301,32 @@ def run():
                     discovery_status[f"rss_{feed['name']}"] = f"{exc.code.value}:{exc.detail}" if exc.detail else exc.code.value
         finally:
             rss.close()
+        # Treasury has no reliable all-press-release RSS feed. Discover only
+        # bounded debt-management titles from its fixed official listing; the
+        # listing is never evidence and qualifying article pages are fetched
+        # and validated through the normal path below.
+        macro_query = SearchQuery(
+            query_id="official_treasury_press_releases",
+            text="official treasury financing releases",
+            variable="us_treasury_financing",
+            purpose="official debt-management events",
+            language="en",
+            time_range="48h",
+            plan_version=plan.plan_version,
+        )
+        feed_prefilter[macro_query.query_id] = False
+        treasury_releases = TreasuryPressReleaseDiscoveryAdapter(
+            timeout_seconds=settings.web_search_timeout_seconds
+        )
+        try:
+            pages.append(treasury_releases.search(macro_query, max_items=4))
+            discovery_status[macro_query.query_id] = "SUCCESS"
+        except MacroDiscoveryError as exc:
+            discovery_status[macro_query.query_id] = (
+                f"{exc.code.value}:{exc.detail}" if exc.detail else exc.code.value
+            )
+        finally:
+            treasury_releases.close()
     if args.juhe:
         juhe_query = SearchQuery(query_id="daily_cn_ai_juhe", text="中国 人工智能 科技", variable="daily_cn_ai", purpose="discovery", language="zh", time_range="24h", plan_version=plan.plan_version)
         for name, adapter_cls, enabled, key in (
@@ -306,19 +393,33 @@ def run():
         if item.source_tier in {ClassifiedTier.T1, ClassifiedTier.T2} and passes_prefilter(item) and not is_fresh(item)
     )
     candidates.sort(key=lambda item: (0 if item.source_tier == ClassifiedTier.T1 else 1, item.best_rank))
-    # Fetch-budget balancing: reserve a China share so T1 global feeds cannot
-    # crowd out the China board, and cap arXiv so papers cannot crowd out news.
+    # Fetch-budget balancing: reserve a small official U.S. macro slice and a
+    # China share, cap arXiv, and cap any one publisher.  These are discovery
+    # diversity controls only; every item still faces the same evidence and
+    # importance gates, so no positive/negative quota is manufactured.
+    macro_pool = [item for item in candidates if _is_us_macro_domain(item.source_domain)]
     cn_pool = [item for item in candidates if _is_cn_domain(item.source_domain)]
-    arxiv_pool = [item for item in candidates if item not in cn_pool and (item.source_domain == "arxiv.org" or item.source_domain.endswith(".arxiv.org"))]
-    global_pool = [item for item in candidates if item not in cn_pool and item not in arxiv_pool]
-    cn_budget = min(len(cn_pool), round(args.max_fetch * CHINA_FETCH_SHARE))
-    arxiv_budget = min(len(arxiv_pool), ARXIV_FETCH_CAP)
-    global_budget = args.max_fetch - cn_budget - arxiv_budget
-    fetch_plan = global_pool[:global_budget] + cn_pool[:cn_budget] + arxiv_pool[:arxiv_budget]
+    arxiv_pool = [item for item in candidates if item not in cn_pool and item not in macro_pool and (item.source_domain == "arxiv.org" or item.source_domain.endswith(".arxiv.org"))]
+    global_pool = [item for item in candidates if item not in cn_pool and item not in arxiv_pool and item not in macro_pool]
+    macro_budget = min(len(macro_pool), MACRO_FETCH_CAP, args.max_fetch)
+    non_macro_budget = args.max_fetch - macro_budget
+    cn_budget = min(len(cn_pool), round(non_macro_budget * CHINA_FETCH_SHARE))
+    arxiv_budget = min(
+        len(arxiv_pool),
+        ARXIV_FETCH_CAP,
+        max(0, non_macro_budget - cn_budget),
+    )
+    global_budget = max(0, non_macro_budget - cn_budget - arxiv_budget)
+    fetch_plan = (
+        _take_domain_diverse(macro_pool, macro_budget, cap=2)
+        + _take_domain_diverse(global_pool, global_budget)
+        + _take_domain_diverse(cn_pool, cn_budget)
+        + arxiv_pool[:arxiv_budget]
+    )
     spare = args.max_fetch - len(fetch_plan)
     if spare > 0:  # hand unused share back to whichever pool has leftovers (papers stay capped)
-        leftovers = [item for item in global_pool[global_budget:] + cn_pool[cn_budget:] if item not in fetch_plan]
-        fetch_plan.extend(leftovers[:spare])
+        leftovers = [item for item in global_pool + cn_pool if item not in fetch_plan]
+        fetch_plan.extend(_take_domain_diverse(leftovers, spare, existing=fetch_plan))
     _write(run_dir / "01-search-results.json", {
         "run_id": run_id, "pages": [p.model_dump(mode="json") for p in pages],
         "discovery_status": discovery_status,
@@ -332,7 +433,10 @@ def run():
     cross_day_duplicates = []
     analysis_urls: dict[str, str] = {}
     analyze_attempts = 0
+    analysis_candidate_count = 0
     provider_validated_outputs = 0
+    macro_analyze_attempts = 0
+    macro_provider_validated_outputs = 0
     provider_request_attempts = 0
     provider_halted = False
     provider_budget_exhausted = False
@@ -343,23 +447,57 @@ def run():
         by_id = {item.candidate_id: item for item in candidates}
         planned_urls = {item.canonical_url for item in fetch_plan}
         analyzer = None
+        macro_analyzer = None
         analyzer_error = None
+        macro_analyzer_error = None
+        macro_request_budget = (
+            min(MACRO_ANALYZE_CAP, max(1, args.max_analyze // 5))
+            if macro_pool and args.analyze
+            else 0
+        )
+        global_request_budget = args.max_analyze - macro_request_budget
         if args.analyze:
-            try:
-                analyzer = GeminiGlobalAiAnalysisAdapter(
-                    api_key=settings.gemini_api_key,
-                    base_url=settings.gemini_base_url,
-                    model=settings.gemini_analysis_model,
-                    prompt_path=PROMPT_PATH,
-                    timeout_seconds=settings.llm_timeout_seconds,
-                    max_retries=settings.llm_max_retries,
-                    max_provider_requests=args.max_analyze,
-                )
-            except ValueError:
-                analyzer_error = {
-                    "reason_code": "GEMINI_CONFIGURATION_ERROR",
-                    "error_type": "ValueError",
-                }
+            governor = GeminiRequestGovernor(
+                minimum_interval_seconds=settings.gemini_min_request_interval_seconds,
+                max_run_seconds=settings.gemini_max_run_seconds,
+            )
+            if global_request_budget:
+                try:
+                    analyzer = GeminiGlobalAiAnalysisAdapter(
+                        api_key=settings.gemini_api_key,
+                        base_url=settings.gemini_base_url,
+                        model=settings.gemini_analysis_model,
+                        prompt_path=PROMPT_PATH,
+                        timeout_seconds=settings.llm_timeout_seconds,
+                        max_retries=settings.llm_max_retries,
+                        max_provider_requests=global_request_budget,
+                        governor=governor,
+                        rate_limit_cooldown_seconds=settings.gemini_rate_limit_cooldown_seconds,
+                    )
+                except ValueError:
+                    analyzer_error = {
+                        "reason_code": "GEMINI_CONFIGURATION_ERROR",
+                        "error_type": "ValueError",
+                    }
+            if macro_request_budget:
+                try:
+                    macro_analyzer = GeminiGlobalAiAnalysisAdapter(
+                        api_key=settings.gemini_api_key,
+                        base_url=settings.gemini_base_url,
+                        model=settings.gemini_analysis_model,
+                        prompt_path=PROMPT_PATH,
+                        supplemental_prompt_path=MACRO_PROMPT_PATH,
+                        timeout_seconds=settings.llm_timeout_seconds,
+                        max_retries=settings.llm_max_retries,
+                        max_provider_requests=macro_request_budget,
+                        governor=governor,
+                        rate_limit_cooldown_seconds=settings.gemini_rate_limit_cooldown_seconds,
+                    )
+                except ValueError:
+                    macro_analyzer_error = {
+                        "reason_code": "GEMINI_CONFIGURATION_ERROR",
+                        "error_type": "ValueError",
+                    }
         try:
             for candidate in list(fetch_plan):
                 result = fetcher.fetch(candidate, allowed_urls=allowed)
@@ -403,18 +541,49 @@ def run():
                 # The adapter enforces max_analyze against actual HTTP requests,
                 # including retries. This counter tracks candidate-level calls
                 # for Ops; a discarded article never buys a free extra request.
+                is_macro_candidate = _is_us_macro_domain(candidate.source_domain)
+                if args.analyze:
+                    analysis_candidate_count += 1
+                active_analyzer = macro_analyzer if is_macro_candidate else analyzer
+                active_analyzer_error = (
+                    macro_analyzer_error if is_macro_candidate else analyzer_error
+                )
+                active_request_budget = (
+                    macro_request_budget if is_macro_candidate else global_request_budget
+                )
+                request_budget_spent = (
+                    active_analyzer is not None
+                    and active_analyzer.request_count >= active_request_budget
+                )
+                if args.analyze and active_request_budget > 0 and request_budget_spent:
+                    if not provider_halted:
+                        analysis_failures.append({
+                            "url": candidate.canonical_url,
+                            "error_code": "GEMINI_REQUEST_BUDGET_EXHAUSTED",
+                            "diagnostics": {
+                                "reason_code": "GEMINI_REQUEST_BUDGET_EXHAUSTED",
+                                "halt_provider_for_run": True,
+                            },
+                        })
+                    provider_halted = True
                 if (
                     args.analyze
                     and not provider_halted
                     and analyze_attempts < args.max_analyze
-                    and (analyzer is None or analyzer.request_count < args.max_analyze)
+                    and active_request_budget > 0
+                    and (
+                        active_analyzer is None
+                        or active_analyzer.request_count < active_request_budget
+                    )
                 ):
                     analyze_attempts += 1
-                    if analyzer is None:
+                    if is_macro_candidate:
+                        macro_analyze_attempts += 1
+                    if active_analyzer is None:
                         analysis_failures.append({
                             "url": candidate.canonical_url,
                             "error_code": "GEMINI_CONFIGURATION_ERROR",
-                            "diagnostics": analyzer_error or {
+                            "diagnostics": active_analyzer_error or {
                                 "reason_code": "GEMINI_CONFIGURATION_ERROR"
                             },
                         })
@@ -424,11 +593,13 @@ def run():
                     # audit record and the run continues. Nothing here may abort
                     # the whole run.
                     try:
-                        analysis = analyzer.analyze(
+                        analysis = active_analyzer.analyze(
                             metadata={"title": result.title or candidate.title, "source_domain": urlsplit(candidate.canonical_url).hostname or "", "source_tier": candidate.source_tier.value},
                             raw_text=result.raw_text, source_url=candidate.canonical_url,
                         )
                         provider_validated_outputs += 1
+                        if is_macro_candidate:
+                            macro_provider_validated_outputs += 1
                         quality_reasons = check_text_quality({
                             "headline": analysis.headline,
                             "what_happened": analysis.what_happened,
@@ -440,10 +611,13 @@ def run():
                         # discard so the item never reaches the digest or ops.
                         scope_term = out_of_scope_headline(analysis.headline)
                         advice_terms = advice_violations(analysis)
+                        non_neutral_terms = neutrality_violations(analysis)
                         if scope_term:
                             analysis_failures.append({"url": candidate.canonical_url, "error_code": "OUT_OF_SCOPE_MARKET_ACTION", "diagnostics": {"matched_term": scope_term, "headline": analysis.headline[:120]}})
                         elif advice_terms:
                             analysis_failures.append({"url": candidate.canonical_url, "error_code": "DISCIPLINE_ADVICE", "diagnostics": {"matched_terms": advice_terms, "headline": analysis.headline[:120]}})
+                        elif non_neutral_terms:
+                            analysis_failures.append({"url": candidate.canonical_url, "error_code": "NON_NEUTRAL_FRAMING", "diagnostics": {"matched_terms": non_neutral_terms, "headline": analysis.headline[:120]}})
                         elif quality_reasons:
                             analysis_failures.append({"url": candidate.canonical_url, "error_code": "LOW_TEXT_QUALITY", "diagnostics": {"reasons": quality_reasons, "headline": analysis.headline[:120]}})
                         # A number claimed without a quote that carries it is a
@@ -479,12 +653,16 @@ def run():
                     except Exception as exc:  # absolute fail-soft guard
                         analysis_failures.append({"url": candidate.canonical_url, "error_code": f"UNEXPECTED_{type(exc).__name__}", "detail": str(exc)[:300]})
         finally:
+            provider_request_attempts = sum(
+                item.request_count
+                for item in (analyzer, macro_analyzer)
+                if item is not None
+            )
+            provider_budget_exhausted = provider_request_attempts >= args.max_analyze
             if analyzer is not None:
-                provider_request_attempts = analyzer.request_count
-                provider_budget_exhausted = (
-                    analyzer.request_count >= args.max_analyze
-                )
                 analyzer.close()
+            if macro_analyzer is not None:
+                macro_analyzer.close()
             fetch_client.close()
     _write(run_dir / "02-fetch.json", {"run_id": run_id, "fetched": [{k: v for k, v in item.items() if k != "raw_text"} for item in sources], "blocked": blocked, "cross_day_duplicates": cross_day_duplicates})
     _write(run_dir / "03-analysis-output.json", [item.model_dump(mode="json") for item in analyses])
@@ -499,7 +677,11 @@ def run():
             settings=settings, run_dir=run_dir, now=now, analyze=args.analyze, china_existing_count=china_count,
         )
     if args.render:
-        digest_text = render_global_digest(digest_items)
+        digest_text = render_global_digest(
+            digest_items,
+            analysis_model=settings.gemini_analysis_model,
+            prompt_version=GeminiGlobalAiAnalysisAdapter.prompt_version,
+        )
         if args.a_share:
             digest_text += "\n\n" + render_a_share_section(a_share_items)
         (run_dir / "04-digest.txt").write_text(digest_text + "\n", encoding="utf-8")
@@ -525,25 +707,72 @@ def run():
         analysis_provider_required=args.analyze,
         analysis_attempts=analyze_attempts,
         provider_validated_outputs=provider_validated_outputs,
+        fetched_count=len(sources),
+        analysis_candidate_count=analysis_candidate_count,
+        provider_halted=provider_halted,
+        provider_failure_codes=[item["error_code"] for item in analysis_failures],
+    )
+    # Macro events have a separately reserved provider budget. Ordinary AI
+    # analysis success must not hide a broken macro-event path (or vice versa).
+    global_analyze_attempts = analyze_attempts - macro_analyze_attempts
+    global_provider_validated_outputs = (
+        provider_validated_outputs - macro_provider_validated_outputs
+    )
+    additional_checks = {
+        "global_analysis_provider_usable": (
+            global_analyze_attempts == 0 or global_provider_validated_outputs > 0
+        ),
+        "macro_analysis_provider_usable": (
+            macro_analyze_attempts == 0 or macro_provider_validated_outputs > 0
+        ),
+    }
+    combined_checks = {**ops.checks, **additional_checks}
+    ops = ops.model_copy(
+        update={
+            "passed": all(combined_checks.values()),
+            "checks": combined_checks,
+            "errors": [name for name, passed in combined_checks.items() if not passed],
+            "offenders": dict(ops.offenders),
+            "stats": {
+                **ops.stats,
+                "global_analysis_attempts": global_analyze_attempts,
+                "global_provider_validated_outputs": global_provider_validated_outputs,
+                "macro_analysis_attempts": macro_analyze_attempts,
+                "macro_provider_validated_outputs": macro_provider_validated_outputs,
+            },
+            "audit": {
+                **ops.audit,
+                "analysis_model": settings.gemini_analysis_model,
+                "prompt_version": GeminiGlobalAiAnalysisAdapter.prompt_version,
+            },
+        }
     )
     _write(run_dir / "ops.json", ops.model_dump(mode="json"))
     _write(run_dir / "source-bundle.json", {
         "run_id": run_id, "plan_version": plan.plan_version, "policy_version": policy.policy_version,
         "search_pages": [hashlib.sha256(json.dumps(p.model_dump(mode="json"), sort_keys=True, default=str).encode()).hexdigest() for p in pages],
         "sources": sources, "blocked": blocked, "event_clusters": clusters,
+        "analysis_runtime": {
+            "model": settings.gemini_analysis_model,
+            "prompt_version": GeminiGlobalAiAnalysisAdapter.prompt_version,
+        },
     })
     summary = {
         "run_id": run_id, "status": "COMPLETED", "queries": len(queries),
         "discovery_status": discovery_status,
         "search_results": sum(len(p.results) for p in pages), "normalized": len(normalized),
         "eligible_t1_t2": len(candidates), "stale_dropped": stale_dropped,
-        "fetch_plan": {"global": len([c for c in fetch_plan if c in global_pool]), "china": len([c for c in fetch_plan if c in cn_pool]), "arxiv": len([c for c in fetch_plan if c in arxiv_pool])},
+        "fetch_plan": {"global": len([c for c in fetch_plan if c in global_pool]), "china": len([c for c in fetch_plan if c in cn_pool]), "macro": len([c for c in fetch_plan if c in macro_pool]), "arxiv": len([c for c in fetch_plan if c in arxiv_pool])},
         "fetched": len(sources), "blocked": len(blocked),
         "analyze_attempts": analyze_attempts, "analyzed": len(analyses),
         "provider_request_attempts": provider_request_attempts,
         "provider_halted": provider_halted,
+        "analysis_candidate_count": analysis_candidate_count,
+        "unprocessed_candidate_count": max(0, analysis_candidate_count - analyze_attempts),
         "provider_budget_exhausted": provider_budget_exhausted,
         "provider_validated_outputs": provider_validated_outputs,
+        "macro_analyze_attempts": macro_analyze_attempts,
+        "macro_provider_validated_outputs": macro_provider_validated_outputs,
         "analysis_failures": len(analysis_failures), "digest_items": len(digest_items),
         "cross_day_duplicates_skipped": len(cross_day_duplicates),
         "ops_passed": ops.passed,

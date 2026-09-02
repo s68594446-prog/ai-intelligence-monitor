@@ -130,6 +130,9 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_ANALYSIS_MODEL: ${{ vars.GEMINI_ANALYSIS_MODEL || 'gemini-3.5-flash' }}
           GEMINI_BASE_URL: ${{ vars.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta' }}
+          GEMINI_MIN_REQUEST_INTERVAL_SECONDS: ${{ vars.GEMINI_MIN_REQUEST_INTERVAL_SECONDS || '4.1' }}
+          GEMINI_RATE_LIMIT_COOLDOWN_SECONDS: ${{ vars.GEMINI_RATE_LIMIT_COOLDOWN_SECONDS || '60' }}
+          GEMINI_MAX_RUN_SECONDS: ${{ vars.GEMINI_MAX_RUN_SECONDS || '2400' }}
           JUHE_HEADLINES_ENABLED: "true"
           JUHE_HEADLINES_API_KEY: ${{ secrets.JUHE_HEADLINES_API_KEY }}
           JUHE_AI_BRIEF_ENABLED: "true"

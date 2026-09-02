@@ -3,6 +3,7 @@ from pathlib import Path
 from app.daily_ai.global_contracts import GlobalAiAnalysisContract
 from app.daily_ai.global_ops import (
     check_global_channel,
+    neutrality_violations,
     sourcing_matches_tier,
     sourcing_tier_diagnostics,
 )
@@ -130,3 +131,69 @@ def test_attempted_but_unusable_analysis_provider_fails_digest_ops():
     assert not failed.passed
     assert failed.errors == ["analysis_provider_usable"]
     assert no_sources.passed
+
+
+def test_halted_provider_with_unprocessed_candidates_fails_coverage_gate():
+    policy = load_source_policy(POLICY_PATH)
+    ops = check_global_channel(
+        analyses=[],
+        raw_text_by_url={},
+        digest_items=[],
+        policy=policy,
+        analysis_provider_required=True,
+        fetched_count=38,
+        analysis_candidate_count=38,
+        analysis_attempts=5,
+        provider_validated_outputs=1,
+        provider_halted=True,
+        provider_failure_codes=["GEMINI_SERVER_ERROR", "GEMINI_RATE_LIMITED"],
+    )
+
+    assert not ops.passed
+    assert not ops.checks["analysis_coverage_complete"]
+    assert ops.audit["unprocessed_candidate_count"] == 33
+    assert ops.audit["provider_halted"] is True
+    assert ops.audit["provider_failure_codes"] == [
+        "GEMINI_RATE_LIMITED", "GEMINI_SERVER_ERROR"
+    ]
+
+
+def test_healthy_full_coverage_with_one_qualifying_item_still_passes():
+    policy = load_source_policy(POLICY_PATH)
+    url = "https://openai.com/index/test"
+    item = analysis(url=url, sourcing="FIRSTHAND_OFFICIAL")
+    ops = check_global_channel(
+        analyses=[item],
+        raw_text_by_url={url: "公司发布了可核验的产业链更新"},
+        digest_items=[{"url": url, "sector": "CHIPS_COMPUTE"}],
+        policy=policy,
+        analysis_provider_required=True,
+        fetched_count=38,
+        analysis_candidate_count=38,
+        analysis_attempts=38,
+        provider_validated_outputs=38,
+        provider_halted=False,
+    )
+
+    assert ops.passed
+    assert ops.checks["analysis_coverage_complete"]
+    assert ops.audit["unprocessed_candidate_count"] == 0
+
+
+def test_promotional_benefit_framing_is_rejected_as_non_neutral():
+    policy = load_source_policy(POLICY_PATH)
+    url = "https://openai.com/index/test"
+    item = analysis(url=url, sourcing="FIRSTHAND_OFFICIAL").model_copy(
+        update={"why_it_matters": "该项目为相关公司注入动力并带来极高确定性。"}
+    )
+
+    assert neutrality_violations(item) == ["极高确定性", "注入动力"]
+    ops = check_global_channel(
+        analyses=[item],
+        raw_text_by_url={url: "公司发布了可核验的产业链更新"},
+        digest_items=[{"url": url, "sector": "CHIPS_COMPUTE"}],
+        policy=policy,
+    )
+
+    assert not ops.passed
+    assert "neutral_language" in ops.errors

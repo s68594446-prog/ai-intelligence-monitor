@@ -12,6 +12,9 @@ import re
 _CJK = r"一-鿿㐀-䶿"
 _CJK_RUN = re.compile(f"[{_CJK}]+")
 _LATIN_RUN = re.compile(r"[a-z0-9]+")
+_CAPITALIZED_ENTITY = re.compile(
+    r"(?<![A-Za-z0-9])[A-Z][A-Za-z0-9.-]{2,}(?![A-Za-z0-9])"
+)
 # Framing words that vary between outlets and carry no event identity.
 _STOPWORDS = {
     "宣布", "发布", "表示", "称", "报道", "消息", "官方", "正式", "日前", "近日",
@@ -49,6 +52,50 @@ def similarity(left: set[str], right: set[str]) -> float:
 # 0.167. 0.30 sits in that gap.
 DEFAULT_THRESHOLD = 0.30
 
+# Same-company reports about one incident often use almost disjoint Chinese
+# wording (for example "agent jailbreak", "sandbox escape", and "safety
+# protocol overhaul").  Character overlap alone then misses the duplicate.
+# These are event-identity anchors, not sentiment labels: they are used only
+# when both texts also name the same capitalized entity.
+_EVENT_ANCHOR_GROUPS = {
+    "safety_incident": (
+        "安全事件", "安全风险", "越狱", "沙盒", "失控", "入侵",
+        "reward hacking", "rogue agent", "jailbreak",
+    ),
+    "supply_shortage": (
+        "供应短缺", "产能短缺", "供不应求", "supply shortage",
+    ),
+    "regulatory_block": (
+        "禁令", "禁用", "出口管制", "import ban", "export control",
+    ),
+}
+
+
+def _entity_tokens(text: str) -> set[str]:
+    return {
+        token.casefold()
+        for token in _CAPITALIZED_ENTITY.findall(text)
+        if token.casefold() not in _STOPWORDS and token.casefold() not in {"the", "ai"}
+    }
+
+
+def _event_anchors(text: str) -> set[str]:
+    lowered = text.casefold()
+    return {
+        name
+        for name, terms in _EVENT_ANCHOR_GROUPS.items()
+        if any(term.casefold() in lowered for term in terms)
+    }
+
+
+def same_anchored_event(left: str, right: str) -> bool:
+    """Conservative duplicate signal: shared named entity and event anchor."""
+
+    return bool(
+        _entity_tokens(left) & _entity_tokens(right)
+        and _event_anchors(left) & _event_anchors(right)
+    )
+
 
 def cluster_texts(texts: dict[str, str], *, threshold: float = DEFAULT_THRESHOLD) -> dict[str, str]:
     """Map each key to a cluster id; keys with similar text share an id."""
@@ -64,7 +111,10 @@ def cluster_texts(texts: dict[str, str], *, threshold: float = DEFAULT_THRESHOLD
     keys = list(texts)
     for index, left in enumerate(keys):
         for right in keys[index + 1:]:
-            if similarity(signatures[left], signatures[right]) >= threshold:
+            if (
+                similarity(signatures[left], signatures[right]) >= threshold
+                or same_anchored_event(texts[left], texts[right])
+            ):
                 left_root, right_root = find(left), find(right)
                 if left_root != right_root:
                     parent[right_root] = left_root

@@ -180,3 +180,6 @@ class GlobalOpsResult(StrictModel):
     # recorded rather than dropped.
     unpublished_findings: dict[str, list[str]] = Field(default_factory=dict)
     stats: dict[str, int] = Field(default_factory=dict)
+    # Provider coverage has booleans/lists as well as counts, so keep it
+    # separate from the integer-only stats contract.
+    audit: dict[str, object] = Field(default_factory=dict)

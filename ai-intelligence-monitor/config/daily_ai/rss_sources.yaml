@@ -10,6 +10,13 @@ version: daily-ai-rss-sources-v3
 # the bilingual industry keyword list. Single-feed failures are recorded
 # per-feed and never abort the run.
 feeds:
+  # --- U.S. macro financing official sources (T1) ---
+  # These feeds are routed to the isolated macro prompt. Routine auctions stay
+  # below the materiality threshold. There is no fixed daily Treasury panel:
+  # only a qualifying event can enter the ordinary macro-policy section.
+  - {name: treasury_offering_announcements, url: 'https://treasurydirect.gov/TA_WS/securities/announced/rss', max_items: 3, prefilter: false}
+  - {name: treasury_auction_results, url: 'https://treasurydirect.gov/TA_WS/securities/auctioned/rss', max_items: 3, prefilter: false}
+  - {name: fed_monetary_policy, url: 'https://www.federalreserve.gov/feeds/press_monetary.xml', max_items: 3, prefilter: false}
   # --- company official / IR (T1) ---
   - {name: skhynix_news, url: 'https://news.skhynix.com/feed/', max_items: 10, prefilter: false}
   - {name: micron_ir, url: 'https://investors.micron.com/rss/news-releases.xml', max_items: 10, prefilter: false}

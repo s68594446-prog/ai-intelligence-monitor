@@ -31,6 +31,9 @@ t1_domains:
   - arxiv.org
   - whitehouse.gov
   - nist.gov
+  - home.treasury.gov
+  - treasurydirect.gov
+  - federalreserve.gov
   - gov.uk
   - europa.eu
   - baidu.com

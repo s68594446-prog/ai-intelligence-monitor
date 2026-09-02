@@ -105,9 +105,13 @@ def select_global_digest(
             "other_sources": extra_sources.get(key, []),
             "sector": item.sector,
             "importance_criterion": item.importance_criterion,
+            "importance_score": item.importance_score,
             "headline": item.headline,
             "what_happened": item.what_happened,
             "analysis": item.why_it_matters,
+            "risks_and_counterevidence": item.risks_and_counterevidence,
+            "uncertainties": item.uncertainties,
+            "announced_vs_delivered": item.announced_vs_delivered,
             "chain_mapping": [entry.model_dump(mode="json") for entry in item.chain_mapping],
             "transmission_path": item.transmission_path,
             "url": str(item.evidence[0].source_url),
@@ -140,22 +144,53 @@ def _render_item(item: dict) -> str:
         source_line = f"🔗 来源：{item['url']}（转述报道，原始出处：{item['original_source']}）"
     blocks = [
         f"【{item['headline']}】",
+        f"重要程度：{int(item.get('importance_score', 0))}/100",
         item["what_happened"],
         f"💡 分析：{item['analysis']}",
     ]
     chain = _render_chain(item)
     if chain:
         blocks.append(chain)
+    risk_items = [
+        value.strip()
+        for value in (
+            *item.get("risks_and_counterevidence", []),
+            *item.get("uncertainties", []),
+        )
+        if value and value.strip()
+    ]
+    if item.get("announced_vs_delivered") == "ANNOUNCED_ONLY":
+        risk_items.insert(0, "该事项目前仅为已宣布计划，尚不等于已交付或已形成产能。")
+    if risk_items:
+        blocks.append("⚠️ 风险与不确定性：" + "；".join(dict.fromkeys(risk_items)))
     if item.get("other_sources"):
         source_line += "\n　　其他来源：" + "、".join(item["other_sources"])
     blocks.append(source_line)
     return "\n\n".join(blocks)
 
 
-def render_global_digest(items: list[dict]) -> str:
+def model_display_name(model: str) -> str:
+    return " ".join(part.capitalize() for part in model.replace("-", " ").split())
+
+
+def prompt_display_version(prompt_version: str) -> str:
+    match = __import__("re").search(r"v(\d+)$", prompt_version, __import__("re").I)
+    return f"Prompt v{match.group(1)}" if match else prompt_version
+
+
+def render_global_digest(
+    items: list[dict],
+    *,
+    analysis_model: str = "unknown",
+    prompt_version: str = "unknown",
+) -> str:
+    metadata = (
+        f"分析元数据：{model_display_name(analysis_model)} · "
+        f"{prompt_display_version(prompt_version)}"
+    )
     if not items:
-        return "AI产业链每日重点\n\n今日无达到标准的产业链重点新闻"
-    lines = ["AI产业链每日重点"]
+        return f"AI产业链每日重点\n\n{metadata}\n\n今日无达到标准的产业链重点新闻"
+    lines = ["AI产业链每日重点", metadata]
     for sector, label in SECTOR_ORDER:
         rows = [item for item in items if item["sector"] == sector]
         if not rows:  # empty sectors are hidden, never padded

@@ -8,6 +8,7 @@ from pydantic import SecretStr
 from app.core.settings import Settings
 from app.daily_ai.gemini_analysis import (
     GeminiGlobalAiAnalysisAdapter,
+    GeminiRequestGovernor,
     gemini_json_schema,
 )
 from app.daily_ai.global_analysis import (
@@ -18,7 +19,8 @@ from app.daily_ai.global_analysis import (
 from app.daily_ai.global_contracts import GlobalAiAnalysisContract
 
 
-PROMPT_PATH = Path(__file__).parents[1] / "app/prompts/daily_global_ai_analysis_v8.txt"
+PROMPT_PATH = Path(__file__).parents[1] / "app/prompts/daily_global_ai_analysis_v9.txt"
+MACRO_PROMPT_PATH = Path(__file__).parents[1] / "app/prompts/daily_us_macro_analysis_v1.txt"
 SOURCE_URL = "https://openai.com/index/example"
 RAW_TEXT = "OpenAI announced a verified AI infrastructure update with 100 systems."
 API_KEY = "test-gemini-secret"
@@ -119,6 +121,21 @@ def test_gemini_uses_header_system_instruction_and_structured_schema_only():
     assert user_payload["raw_text"] == RAW_TEXT
 
 
+def test_supplemental_macro_rules_append_to_unmodified_v9_system_instruction():
+    seen = {}
+
+    def handler(request: httpx.Request):
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(200, json=response_for(valid_output()))
+
+    analyzer = adapter(handler, supplemental_prompt_path=MACRO_PROMPT_PATH)
+    analyzer.analyze(metadata={}, raw_text=RAW_TEXT, source_url=SOURCE_URL)
+    system_text = seen["body"]["system_instruction"]["parts"][0]["text"]
+
+    assert system_text.startswith(PROMPT_PATH.read_text(encoding="utf-8").strip())
+    assert system_text.endswith(MACRO_PROMPT_PATH.read_text(encoding="utf-8").strip())
+
+
 def test_gemini_schema_removes_unsupported_const_and_constraints():
     converted = gemini_json_schema(GlobalAiAnalysisContract.model_json_schema())
     encoded = json.dumps(converted, sort_keys=True)
@@ -214,9 +231,9 @@ def test_gemini_final_429_exposes_only_safe_quota_metadata_and_halts_run():
         analyzer.analyze(metadata={}, raw_text=RAW_TEXT, source_url=SOURCE_URL)
 
     diagnostics = caught.value.diagnostics
-    assert diagnostics["reason_code"] == "GEMINI_RATE_LIMITED"
-    assert diagnostics["request_attempts"] == 2
-    assert diagnostics["provider_requests_total"] == 2
+    assert diagnostics["reason_code"] == "GEMINI_DAILY_QUOTA_EXHAUSTED"
+    assert diagnostics["request_attempts"] == 1
+    assert diagnostics["provider_requests_total"] == 1
     assert diagnostics["halt_provider_for_run"] is True
     assert diagnostics["provider_status"] == "RESOURCE_EXHAUSTED"
     assert diagnostics["quota_ids"] == [
@@ -240,22 +257,136 @@ def test_gemini_never_exceeds_explicit_provider_request_budget():
     assert caught.value.diagnostics["request_attempts"] == 1
 
 
-def test_gemini_does_not_sleep_through_long_retry_after_window():
+def test_gemini_minute_limit_uses_one_bounded_cooldown_then_continues():
     sleeps = []
+    statuses = [429, 429, 200]
+
+    def handler(request):
+        status = statuses.pop(0)
+        if status == 200:
+            return httpx.Response(200, json=response_for(valid_output()))
+        return httpx.Response(
+            status,
+            headers={"Retry-After": "90"},
+            json={"error": {"status": "RESOURCE_EXHAUSTED", "details": [{
+                "violations": [{"quotaId": "GenerateRequestsPerMinutePerProjectPerModel-FreeTier"}]
+            }]}},
+        )
+
     analyzer = adapter(
-        lambda request: httpx.Response(
-            429, headers={"Retry-After": "60"}, json={}
-        ),
-        max_retries=2,
+        handler,
+        max_retries=1,
         sleep_fn=sleeps.append,
+        rate_limit_cooldown_seconds=60,
     )
 
     with pytest.raises(ProviderCallError) as caught:
         analyzer.analyze(metadata={}, raw_text=RAW_TEXT, source_url=SOURCE_URL)
 
-    assert analyzer.request_count == 1
-    assert sleeps == []
-    assert caught.value.diagnostics["retry_after_seconds"] == 60.0
+    assert analyzer.request_count == 2
+    assert sleeps == [60]
+    assert caught.value.diagnostics["retry_after_seconds"] == 90.0
+    assert caught.value.diagnostics["halt_provider_for_run"] is False
+
+    result = analyzer.analyze(metadata={}, raw_text=RAW_TEXT, source_url=SOURCE_URL)
+    assert isinstance(result, GlobalAiAnalysisContract)
+    assert analyzer.request_count == 3
+    assert sleeps == [60]
+
+
+def test_shared_governor_paces_requests_across_candidates_and_adapters():
+    class Clock:
+        now = 0.0
+
+        def monotonic(self):
+            return self.now
+
+        def sleep(self, seconds):
+            self.now += seconds
+
+    clock = Clock()
+    governor = GeminiRequestGovernor(
+        minimum_interval_seconds=4.1,
+        max_run_seconds=100,
+        sleep_fn=clock.sleep,
+        monotonic_fn=clock.monotonic,
+    )
+    handler = lambda request: httpx.Response(200, json=response_for(valid_output()))
+    first = adapter(handler, governor=governor)
+    second = adapter(handler, governor=governor)
+
+    first.analyze(metadata={}, raw_text=RAW_TEXT, source_url=SOURCE_URL)
+    second.analyze(metadata={}, raw_text=RAW_TEXT, source_url=SOURCE_URL)
+
+    assert clock.now == pytest.approx(4.1)
+
+
+def test_consecutive_503s_recover_and_later_candidate_is_still_analyzed():
+    statuses = [503, 503, 200, 200]
+
+    def handler(request):
+        status = statuses.pop(0)
+        return (
+            httpx.Response(200, json=response_for(valid_output()))
+            if status == 200
+            else httpx.Response(status, json={"error": {"status": "UNAVAILABLE"}})
+        )
+
+    analyzer = adapter(handler, max_retries=2, max_provider_requests=5)
+    first = analyzer.analyze(metadata={}, raw_text=RAW_TEXT, source_url=SOURCE_URL)
+    second = analyzer.analyze(metadata={}, raw_text=RAW_TEXT, source_url=SOURCE_URL)
+
+    assert isinstance(first, GlobalAiAnalysisContract)
+    assert isinstance(second, GlobalAiAnalysisContract)
+    assert analyzer.request_count == 4
+
+
+def test_503_retry_after_is_capped():
+    statuses = [503, 200]
+    sleeps = []
+
+    def handler(request):
+        status = statuses.pop(0)
+        return (
+            httpx.Response(200, json=response_for(valid_output()))
+            if status == 200
+            else httpx.Response(503, headers={"Retry-After": "900"}, json={})
+        )
+
+    analyzer = adapter(handler, max_retries=1, sleep_fn=sleeps.append)
+    analyzer.analyze(metadata={}, raw_text=RAW_TEXT, source_url=SOURCE_URL)
+
+    assert sleeps == [10.0]
+
+
+def test_shared_governor_enforces_maximum_run_time():
+    class Clock:
+        now = 0.0
+
+        def monotonic(self):
+            return self.now
+
+        def sleep(self, seconds):
+            self.now += seconds
+
+    clock = Clock()
+    governor = GeminiRequestGovernor(
+        minimum_interval_seconds=1,
+        max_run_seconds=10,
+        sleep_fn=clock.sleep,
+        monotonic_fn=clock.monotonic,
+    )
+    analyzer = adapter(
+        lambda request: httpx.Response(200, json=response_for(valid_output())),
+        governor=governor,
+    )
+    analyzer.analyze(metadata={}, raw_text=RAW_TEXT, source_url=SOURCE_URL)
+    clock.now = 11
+
+    with pytest.raises(ProviderCallError) as caught:
+        analyzer.analyze(metadata={}, raw_text=RAW_TEXT, source_url=SOURCE_URL)
+
+    assert caught.value.diagnostics["reason_code"] == "GEMINI_RUN_DEADLINE_EXCEEDED"
     assert caught.value.diagnostics["halt_provider_for_run"] is True
 
 
@@ -305,6 +436,19 @@ def test_gemini_rejects_nonofficial_base_url_and_invalid_model():
             base_url="https://generativelanguage.googleapis.com/v1beta",
             model="gemini-3.5-flash?key=secret",
             prompt_path=PROMPT_PATH,
+        )
+
+
+def test_prompt_path_and_adapter_version_cannot_drift(tmp_path):
+    wrong = tmp_path / "daily_global_ai_analysis_v8.txt"
+    wrong.write_text("unchanged prompt", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="prompt path/version mismatch"):
+        GeminiGlobalAiAnalysisAdapter(
+            api_key=API_KEY,
+            base_url="https://generativelanguage.googleapis.com/v1beta",
+            model="gemini-3.5-flash",
+            prompt_path=wrong,
         )
 
 

@@ -46,9 +46,11 @@ class EmailDigestItem:
     what_happened: str
     analysis: str
     companies_and_path: str
+    risks_and_uncertainties: str
     source_url: str
     source_note: str
     other_sources: tuple[str, ...]
+    importance_score: int
 
 
 @dataclass(frozen=True)
@@ -107,6 +109,8 @@ def build_subject(day: str) -> str:
 SECTION_RE = re.compile(r"^═══\s*【(.+?)】\s*═══$")
 HEADLINE_RE = re.compile(r"^【(.+?)】$")
 SOURCE_RE = re.compile(r"^(https?://[^\s（]+)(.*)$")
+IMPORTANCE_RE = re.compile(r"^重要程度：(\d{1,3})/100$")
+METADATA_RE = re.compile(r"^分析元数据：(.+?)\s*·\s*(Prompt\s+v\d+)$", re.I | re.M)
 EMAIL_SECTOR_LABELS = {"封装·设备·材料": "封装、设备与材料"}
 
 
@@ -121,17 +125,27 @@ def _parse_item(lines: list[str]) -> EmailDigestItem | None:
     what_happened: list[str] = []
     analysis: list[str] = []
     companies_and_path: list[str] = []
+    risks_and_uncertainties: list[str] = []
     source_url = ""
     source_note = ""
     other_sources: list[str] = []
+    importance_score = -1
     field = "what"
     for value in values[1:]:
-        if value.startswith("💡 分析："):
+        importance = IMPORTANCE_RE.fullmatch(value)
+        if importance:
+            importance_score = min(100, max(0, int(importance.group(1))))
+        elif value.startswith("💡 分析："):
             field = "analysis"
             analysis.append(value.removeprefix("💡 分析：").strip())
         elif value.startswith("📍 涉及："):
             field = "chain"
             companies_and_path.append(value.removeprefix("📍 涉及：").strip())
+        elif value.startswith("⚠️ 风险与不确定性："):
+            field = "risks"
+            risks_and_uncertainties.append(
+                value.removeprefix("⚠️ 风险与不确定性：").strip()
+            )
         elif value.startswith("🔗 来源："):
             field = "source"
             source = value.removeprefix("🔗 来源：").strip()
@@ -139,7 +153,7 @@ def _parse_item(lines: list[str]) -> EmailDigestItem | None:
             if match:
                 source_url, source_note = match.group(1), match.group(2).strip()
             else:
-                source_note = source
+                source_note = "无效来源地址"
         elif value.startswith("其他来源：") or value.startswith("　　其他来源："):
             field = "other_sources"
             source_list = value.split("：", 1)[1]
@@ -152,15 +166,19 @@ def _parse_item(lines: list[str]) -> EmailDigestItem | None:
             analysis.append(value)
         elif field == "chain":
             companies_and_path.append(value)
+        elif field == "risks":
+            risks_and_uncertainties.append(value)
 
     return EmailDigestItem(
         headline=headline_match.group(1),
         what_happened=" ".join(what_happened),
         analysis=" ".join(analysis),
         companies_and_path=" ".join(companies_and_path),
+        risks_and_uncertainties=" ".join(risks_and_uncertainties),
         source_url=source_url,
         source_note=source_note,
         other_sources=tuple(other_sources),
+        importance_score=importance_score,
     )
 
 
@@ -213,7 +231,7 @@ def _safe_link(url: str, *, label: str | None = None) -> str:
         return escaped
     return (
         f'<a href="{html.escape(url, quote=True)}" '
-        'style="color:#1769aa;text-decoration:underline;word-break:break-all">'
+        'style="color:#8f1d2c;text-decoration:underline;word-break:break-all">'
         f"{escaped}</a>"
     )
 
@@ -222,13 +240,29 @@ def _detail_row(label: str, value: str) -> str:
     return (
         '<tr><td style="padding:0 22px 16px 22px">'
         f'<div style="font-size:11px;line-height:16px;letter-spacing:.08em;'
-        f'color:#64748b;font-weight:700;margin:0 0 5px 0">{html.escape(label)}</div>'
-        f'<div style="font-size:14px;line-height:23px;color:#25364a;margin:0">'
+        f'color:#8f1d2c;font-weight:700;margin:0 0 5px 0">{html.escape(label)}</div>'
+        f'<div style="font-size:14px;line-height:23px;color:#342b2d;margin:0">'
         f'{html.escape(value or "未明确列出")}</div></td></tr>'
     )
 
 
+def importance_stars(score: int) -> int:
+    if score < 0:  # legacy digests did not carry the numeric score
+        return 0
+    if score >= 90:
+        return 5
+    if score >= 80:
+        return 4
+    if score >= 70:
+        return 3
+    if score >= 60:
+        return 2
+    return 1
+
+
 def _render_card(item: EmailDigestItem) -> str:
+    stars = importance_stars(item.importance_score)
+    score_label = f"{stars}/5" if item.importance_score >= 0 else "未记录"
     source = _safe_link(item.source_url) if item.source_url else html.escape(
         item.source_note or "未提供"
     )
@@ -247,23 +281,30 @@ def _render_card(item: EmailDigestItem) -> str:
 
     return (
         '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
-        'border="0" style="width:100%;border:1px solid #dbe4ee;border-collapse:separate;'
+        'border="0" style="width:100%;border:1px solid #ead7da;border-collapse:separate;'
         'border-spacing:0;background-color:#ffffff;border-radius:8px;margin:0 0 14px 0">'
-        '<tr><td style="padding:19px 22px 15px 22px;border-left:4px solid #2774a8">'
-        f'<div style="font-size:17px;line-height:25px;color:#102a43;font-weight:700">'
-        f'{html.escape(item.headline)}</div></td></tr>'
+        '<tr><td style="padding:19px 22px 15px 18px;border-left:4px solid #9a2637">'
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" '
+        'style="width:100%;border-collapse:collapse"><tr>'
+        f'<td style="font-size:17px;line-height:25px;color:#3b1820;font-weight:700;vertical-align:top">{html.escape(item.headline)}</td>'
+        '<td align="right" style="width:112px;padding-left:10px;white-space:nowrap;vertical-align:top">'
+        f'<span style="color:#d9972b;font-size:16px;letter-spacing:1px">{"★" * stars}</span>'
+        f'<span style="color:#d8d1d2;font-size:16px;letter-spacing:1px">{"☆" * (5 - stars)}</span>'
+        f'<div style="font-size:11px;line-height:16px;color:#7b6870">{score_label}</div>'
+        '</td></tr></table></td></tr>'
         + _detail_row("发生了什么", item.what_happened)
         + _detail_row("产业链解读", item.analysis)
         + _detail_row("涉及公司与传导路径", item.companies_and_path)
+        + _detail_row("风险与不确定性", item.risks_and_uncertainties)
         + '<tr><td style="padding:0 22px 20px 22px">'
         '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
-        'border="0" style="width:100%;background-color:#f6f9fc;border-collapse:collapse">'
-        '<tr><td style="width:50%;vertical-align:top;padding:12px 14px;border-right:1px solid #dbe4ee">'
-        '<div style="font-size:11px;line-height:16px;letter-spacing:.08em;color:#64748b;'
+        'border="0" style="width:100%;background-color:#fbf6f7;border-collapse:collapse">'
+        '<tr><td style="width:50%;vertical-align:top;padding:12px 14px;border-right:1px solid #ead7da">'
+        '<div style="font-size:11px;line-height:16px;letter-spacing:.08em;color:#8f1d2c;'
         'font-weight:700;margin-bottom:5px">原始来源</div>'
         f'<div style="font-size:12px;line-height:19px">{source}</div></td>'
         '<td style="width:50%;vertical-align:top;padding:12px 14px">'
-        '<div style="font-size:11px;line-height:16px;letter-spacing:.08em;color:#64748b;'
+        '<div style="font-size:11px;line-height:16px;letter-spacing:.08em;color:#8f1d2c;'
         'font-weight:700;margin-bottom:5px">补充来源</div>'
         f'<div style="font-size:12px;line-height:19px">{supplemental}</div></td></tr>'
         '</table></td></tr></table>'
@@ -276,6 +317,15 @@ def render_bodies(day: str, body: str) -> tuple[str, str]:
     sections = parse_digest_sections(body)
     item_count = sum(len(section.items) for section in sections)
     section_count = len(sections)
+    all_items = [item for section in sections for item in section.items]
+    highest_stars = max(
+        (importance_stars(item.importance_score) for item in all_items),
+        default=0,
+    )
+    metadata_match = METADATA_RE.search(body)
+    model_label = metadata_match.group(1).strip() if metadata_match else "模型信息未记录"
+    prompt_label = metadata_match.group(2).strip() if metadata_match else "Prompt 未记录"
+    runtime_label = f"分析模型 {model_label} · {prompt_label}"
     section_html = []
     for section in sections:
         cards = "".join(_render_card(item) for item in section.items)
@@ -283,10 +333,10 @@ def render_bodies(day: str, body: str) -> tuple[str, str]:
             '<tr><td style="padding:8px 24px 2px 24px">'
             '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
             'border="0" style="width:100%;border-collapse:collapse">'
-            '<tr><td style="padding:10px 0 12px 0;border-bottom:2px solid #c8d8e8">'
-            f'<span style="font-size:18px;line-height:26px;color:#153e5c;font-weight:700">'
+            '<tr><td style="padding:10px 0 12px 0;border-bottom:2px solid #c98d96">'
+            f'<span style="font-size:18px;line-height:26px;color:#7d1c2a;font-weight:700">'
             f'{html.escape(section.label)}</span>'
-            f'<span style="font-size:12px;color:#64748b;margin-left:8px">'
+            f'<span style="font-size:12px;color:#7b6870;margin-left:8px">'
             f'{len(section.items)} 条</span></td></tr>'
             f'<tr><td style="padding:14px 0 4px 0">{cards}</td></tr>'
             '</table></td></tr>'
@@ -299,37 +349,48 @@ def render_bodies(day: str, body: str) -> tuple[str, str]:
     html_body = (
         '<!doctype html><html><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width, initial-scale=1"></head>'
-        '<body style="margin:0;padding:0;background-color:#eef3f8;'
-        'font-family:Arial,Helvetica,sans-serif;color:#25364a">'
+        '<body style="margin:0;padding:0;background-color:#f3eeee;'
+        'font-family:Arial,Helvetica,sans-serif;color:#342b2d">'
         '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
-        'border="0" style="width:100%;background-color:#eef3f8;border-collapse:collapse">'
+        'border="0" style="width:100%;background-color:#f3eeee;border-collapse:collapse">'
         '<tr><td align="center" style="padding:22px 10px">'
         '<table role="presentation" width="660" cellpadding="0" cellspacing="0" '
         'border="0" style="width:100%;max-width:660px;background-color:#ffffff;'
         'border-collapse:collapse;border-radius:10px;overflow:hidden">'
-        '<tr><td style="padding:30px 28px 24px 28px;background-color:#0d2942;'
-        'border-top:5px solid #36a3c8">'
+        '<tr><td style="padding:28px 28px 24px 28px;background-color:#7a1724;'
+        'border-top:5px solid #b65361">'
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" '
+        'style="width:100%;border-collapse:collapse"><tr><td style="vertical-align:top">'
         '<div style="font-size:12px;line-height:18px;letter-spacing:.14em;'
-        'color:#8ed4eb;font-weight:700;margin-bottom:8px">AI SUPPLY CHAIN INTELLIGENCE</div>'
+        'color:#f1c7cd;font-weight:700;margin-bottom:8px">AI SUPPLY CHAIN INTELLIGENCE</div>'
         '<div style="font-size:28px;line-height:36px;color:#ffffff;font-weight:700">'
         'AI 产业链日报</div>'
-        f'<div style="font-size:14px;line-height:22px;color:#c7d7e6;margin-top:6px">'
-        f'{html.escape(day)}</div></td></tr>'
-        '<tr><td style="padding:18px 24px 10px 24px;background-color:#f8fafc">'
+        '<div style="font-size:13px;line-height:20px;color:#f3d9dd;margin-top:4px">'
+        '每日产业链关键变化与证据摘要</div>'
+        f'<div style="font-size:14px;line-height:22px;color:#f3d9dd;margin-top:8px">{html.escape(day)}</div>'
+        '</td><td align="right" style="width:220px;padding-left:14px;vertical-align:top">'
+        '<span style="display:inline-block;padding:7px 10px;background-color:#65121d;border:1px solid #a84d5a;'
+        'font-size:11px;line-height:17px;color:#ffffff;border-radius:4px">'
+        f'{html.escape(runtime_label)}</span></td></tr></table></td></tr>'
+        '<tr><td style="padding:18px 24px 10px 24px;background-color:#fbf7f7">'
         '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
         'border="0" style="width:100%;border-collapse:collapse">'
-        '<tr><td style="width:50%;padding:10px 12px;border-right:1px solid #dbe4ee">'
-        '<div style="font-size:11px;color:#64748b;letter-spacing:.08em">当日新闻</div>'
-        f'<div style="font-size:23px;line-height:30px;color:#153e5c;font-weight:700">'
+        '<tr><td style="width:33.33%;padding:10px 12px;border-right:1px solid #ead7da">'
+        '<div style="font-size:11px;color:#7b6870;letter-spacing:.08em">新闻条数</div>'
+        f'<div style="font-size:23px;line-height:30px;color:#7d1c2a;font-weight:700">'
         f'{item_count} <span style="font-size:13px;font-weight:400">条</span></div></td>'
-        '<td style="width:50%;padding:10px 12px">'
-        '<div style="font-size:11px;color:#64748b;letter-spacing:.08em">覆盖产业链环节</div>'
-        f'<div style="font-size:23px;line-height:30px;color:#153e5c;font-weight:700">'
-        f'{section_count} <span style="font-size:13px;font-weight:400">个</span></div></td>'
+        '<td style="width:33.33%;padding:10px 12px;border-right:1px solid #ead7da">'
+        '<div style="font-size:11px;color:#7b6870;letter-spacing:.08em">覆盖产业链环节</div>'
+        f'<div style="font-size:23px;line-height:30px;color:#7d1c2a;font-weight:700">{section_count} '
+        '<span style="font-size:13px;font-weight:400">个</span></div></td>'
+        '<td style="width:33.33%;padding:10px 12px">'
+        '<div style="font-size:11px;color:#7b6870;letter-spacing:.08em">最高重要程度</div>'
+        f'<div style="font-size:19px;line-height:30px;color:#d9972b;font-weight:700">{"★" * highest_stars}'
+        f'<span style="font-size:12px;color:#7b6870;font-weight:400"> {highest_stars}/5</span></div></td>'
         '</tr></table></td></tr>'
         + "".join(section_html)
-        + '<tr><td style="padding:22px 28px;background-color:#f2f6fa;border-top:1px solid #dbe4ee;'
-        'font-size:12px;line-height:20px;color:#64748b;text-align:center">'
+        + '<tr><td style="padding:22px 28px;background-color:#f8f2f3;border-top:1px solid #ead7da;'
+        'font-size:12px;line-height:20px;color:#7b6870;text-align:center">'
         '内容仅用于产业研究与信息整理，不构成任何投资建议。'
         '</td></tr></table></td></tr></table></body></html>'
     )

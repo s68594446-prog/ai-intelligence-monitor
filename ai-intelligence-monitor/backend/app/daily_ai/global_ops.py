@@ -86,6 +86,16 @@ PROHIBITED_ADVICE = (
     "should buy", "should sell", "bullish on", "bearish on",
 )
 
+# Investor-style promotional framing can make a factually accurate digest read
+# like a bullish note even without literal 利好/看好 language. Keep this list
+# deliberately narrow: ordinary words such as 增长 or 强劲 remain legal when
+# they report source facts, while explicit benefit/catalyst rhetoric is not.
+NON_NEUTRAL_FRAMING = (
+    "直接受益", "显著受益", "有望受益", "将受益于", "受益标的",
+    "极高确定性", "强确定性", "增长红利", "需求红利", "注入动力",
+    "行业背书", "构成催化", "催化剂", "打开增长空间", "释放增长潜力",
+)
+
 # Direction words (上涨/下跌/涨幅/跌幅) are legitimate when they describe
 # product or commodity prices — PRICE_MOVE is a core materiality criterion
 # ("DRAM 合约价上涨20%" is a fact). They are prohibited only when aimed at
@@ -123,6 +133,13 @@ def advice_violations(item: GlobalAiAnalysisContract) -> list[str]:
     if item.investment_advice:
         matched.append("investment_advice=true")
     return matched
+
+
+def neutrality_violations(item: GlobalAiAnalysisContract) -> list[str]:
+    """Return narrow promotional phrases found in model-authored prose."""
+
+    lowered = narrative_text(item).casefold()
+    return [term for term in NON_NEUTRAL_FRAMING if term.casefold() in lowered]
 
 
 def sourcing_tier_diagnostics(
@@ -173,6 +190,10 @@ def check_global_channel(
     analysis_provider_required: bool = False,
     analysis_attempts: int = 0,
     provider_validated_outputs: int = 0,
+    fetched_count: int = 0,
+    analysis_candidate_count: int = 0,
+    provider_halted: bool = False,
+    provider_failure_codes: list[str] | None = None,
 ) -> GlobalOpsResult:
     def evidence_tier_ok(url: str) -> bool:
         return classify_url(url, policy)[0] in {ClassifiedTier.T1, ClassifiedTier.T2}
@@ -217,6 +238,10 @@ def check_global_channel(
         f"{a.headline[:70]} → 命中：{'/'.join(advice_violations(a))}"
         for a in analyses if advice_violations(a)
     ]
+    offenders["neutral_language"] = [
+        f"{a.headline[:70]} → 命中：{'/'.join(neutrality_violations(a))}"
+        for a in analyses if neutrality_violations(a)
+    ]
     offenders["evidence_exact"] = [
         a.headline[:80] for a in analyses
         if not all(quote_matches(e.quote, raw_text_by_url.get(str(e.source_url), "")) for e in a.evidence)
@@ -236,6 +261,7 @@ def check_global_channel(
     sector_counts: dict[str, int] = {}
     for item in digest_items:
         sector_counts[item.get("sector", "?")] = sector_counts.get(item.get("sector", "?"), 0) + 1
+    unprocessed_candidate_count = max(0, analysis_candidate_count - analysis_attempts)
     checks = {
         # A truly empty news day remains legal.  But once fetched sources were
         # sent for analysis, zero schema-validated provider outputs means the
@@ -244,6 +270,12 @@ def check_global_channel(
             not analysis_provider_required
             or analysis_attempts == 0
             or provider_validated_outputs > 0
+        ),
+        # A low-yield but fully processed day is honest. A low-yield day caused
+        # by a halted provider with candidates left untouched is incomplete and
+        # must fail closed before publication/email.
+        "analysis_coverage_complete": not (
+            provider_halted and unprocessed_candidate_count > 0
         ),
         "total_limit": len(digest_items) <= TOTAL_LIMIT,
         "sector_cap": all(count <= SECTOR_CAP for count in sector_counts.values()),
@@ -255,6 +287,7 @@ def check_global_channel(
         "evidence_tier": all(all(evidence_tier_ok(str(e.source_url)) for e in a.evidence) for a in analyses),
         "numeric_claims_cited": not offenders["numeric_claims_cited"],
         "no_investment_advice": not offenders["no_investment_advice"],
+        "neutral_language": not offenders["neutral_language"],
         "no_repeated_statement_published": all(
             a.novelty != "REPEATED_STATEMENT" for a in analyses if a.importance_score >= IMPORTANCE_THRESHOLD
         ),
@@ -276,5 +309,14 @@ def check_global_channel(
             "analyses_discarded_evidence_mismatch": discarded_evidence_failures,
             "analysis_attempts": analysis_attempts,
             "provider_validated_outputs": provider_validated_outputs,
+        },
+        audit={
+            "fetched_count": fetched_count,
+            "analysis_candidate_count": analysis_candidate_count,
+            "analysis_attempts": analysis_attempts,
+            "validated_outputs": provider_validated_outputs,
+            "provider_halted": provider_halted,
+            "provider_failure_codes": sorted(set(provider_failure_codes or [])),
+            "unprocessed_candidate_count": unprocessed_candidate_count,
         },
     )

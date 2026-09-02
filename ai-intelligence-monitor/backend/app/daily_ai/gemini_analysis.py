@@ -35,6 +35,8 @@ OFFICIAL_GEMINI_HOST = "generativelanguage.googleapis.com"
 MODEL_NAME = re.compile(r"^[A-Za-z0-9._-]+$")
 SAFE_PROVIDER_CODE = re.compile(r"^[A-Za-z0-9_.-]{1,120}$")
 MAX_RETRY_DELAY_SECONDS = 10.0
+PER_MINUTE_QUOTA = re.compile(r"PerMinute", re.IGNORECASE)
+DAILY_QUOTA = re.compile(r"PerDay|Daily", re.IGNORECASE)
 
 # The GenerateContent API supports a documented subset of JSON Schema.  Keys
 # omitted here remain enforced by Pydantic after generation; for example the
@@ -152,10 +154,62 @@ def _safe_provider_diagnostics(response: httpx.Response) -> dict:
     return result
 
 
+class GeminiRequestGovernor:
+    """One pacing/deadline budget shared by every Phase 3C Gemini adapter."""
+
+    def __init__(
+        self,
+        *,
+        minimum_interval_seconds: float,
+        max_run_seconds: float,
+        sleep_fn=time.sleep,
+        monotonic_fn=time.monotonic,
+    ):
+        self.minimum_interval_seconds = max(0.0, minimum_interval_seconds)
+        self._sleep = sleep_fn
+        self._clock = monotonic_fn
+        self._started_at = self._clock()
+        self._deadline = self._started_at + max_run_seconds
+        self._last_request_at: float | None = None
+        self.minute_cooldown_used = False
+
+    def sleep(self, seconds: float) -> None:
+        seconds = max(0.0, seconds)
+        if self._clock() + seconds > self._deadline:
+            raise ProviderCallError(
+                "Gemini run deadline exhausted",
+                diagnostics={
+                    "reason_code": "GEMINI_RUN_DEADLINE_EXCEEDED",
+                    "halt_provider_for_run": True,
+                },
+            )
+        self._sleep(seconds)
+
+    def before_request(self) -> None:
+        now = self._clock()
+        if now > self._deadline:
+            self.sleep(0)
+        if self._last_request_at is not None:
+            delay = max(
+                0.0,
+                self.minimum_interval_seconds - (now - self._last_request_at),
+            )
+            if delay:
+                self.sleep(delay)
+        self._last_request_at = self._clock()
+
+    def minute_cooldown(self, seconds: float) -> bool:
+        if self.minute_cooldown_used:
+            return False
+        self.minute_cooldown_used = True
+        self.sleep(seconds)
+        return True
+
+
 class GeminiGlobalAiAnalysisAdapter:
     name = "GeminiGlobalAiAnalysisAdapter"
     version = "gemini-global-ai-v1"
-    prompt_version = "daily-global-ai-analysis-v8"
+    prompt_version = "daily-global-ai-analysis-v9"
 
     def __init__(
         self,
@@ -164,9 +218,12 @@ class GeminiGlobalAiAnalysisAdapter:
         base_url: str,
         model: str,
         prompt_path: Path,
+        supplemental_prompt_path: Path | None = None,
         timeout_seconds: float = 60,
         max_retries: int = 2,
         max_provider_requests: int | None = None,
+        governor: GeminiRequestGovernor | None = None,
+        rate_limit_cooldown_seconds: float = 60.0,
         sleep_fn=time.sleep,
         random_fn=random.random,
         client: httpx.Client | None = None,
@@ -190,12 +247,22 @@ class GeminiGlobalAiAnalysisAdapter:
             raise ValueError("max_retries must be between 0 and 5")
         if max_provider_requests is not None and max_provider_requests < 1:
             raise ValueError("max_provider_requests must be positive")
+        expected_prompt_version = Path(prompt_path).stem.replace("_", "-")
+        if expected_prompt_version != self.prompt_version:
+            raise ValueError(
+                f"prompt path/version mismatch: {expected_prompt_version} != {self.prompt_version}"
+            )
 
         self.model = model
         self.endpoint = (
             f"{base_url.rstrip('/')}/models/{quote(model, safe='-._')}:generateContent"
         )
         self.instructions = Path(prompt_path).read_text(encoding="utf-8").strip()
+        if supplemental_prompt_path is not None:
+            supplemental = Path(supplemental_prompt_path).read_text(
+                encoding="utf-8"
+            ).strip()
+            self.instructions = f"{self.instructions}\n\n{supplemental}"
         self.response_schema = gemini_json_schema(
             GlobalAiAnalysisContract.model_json_schema()
         )
@@ -210,6 +277,12 @@ class GeminiGlobalAiAnalysisAdapter:
         self.request_count = 0
         self._sleep = sleep_fn
         self._random = random_fn
+        self.governor = governor or GeminiRequestGovernor(
+            minimum_interval_seconds=0,
+            max_run_seconds=2400,
+            sleep_fn=sleep_fn,
+        )
+        self.rate_limit_cooldown_seconds = rate_limit_cooldown_seconds
         self.client = client or httpx.Client(
             timeout=timeout_seconds,
             transport=httpx.HTTPTransport(retries=0),
@@ -278,6 +351,7 @@ class GeminiGlobalAiAnalysisAdapter:
                         "halt_provider_for_run": True,
                     },
                 )
+            self.governor.before_request()
             self.request_count += 1
             request_attempts += 1
             try:
@@ -304,34 +378,57 @@ class GeminiGlobalAiAnalysisAdapter:
                     },
                 ) from exc
 
-            retryable = response.status_code == 429 or response.status_code >= 500
+            diagnostics = _safe_provider_diagnostics(response)
+            quota_ids = diagnostics.get("quota_ids", [])
+            daily_quota = any(DAILY_QUOTA.search(value) for value in quota_ids)
+            minute_quota = any(PER_MINUTE_QUOTA.search(value) for value in quota_ids)
+            retryable = response.status_code >= 500
             retry_after = _retry_after_seconds(response)
-            retry_delay_too_long = (
-                retry_after is not None and retry_after > MAX_RETRY_DELAY_SECONDS
-            )
             budget_remaining = (
                 self.max_provider_requests is None
                 or self.request_count < self.max_provider_requests
             )
             if (
+                response.status_code == 429
+                and not daily_quota
+                and budget_remaining
+                and retry_number < self.max_retries
+            ):
+                cooldown = min(
+                    retry_after if retry_after is not None else self.rate_limit_cooldown_seconds,
+                    self.rate_limit_cooldown_seconds,
+                )
+                if self.governor.minute_cooldown(cooldown):
+                    continue
+            if (
                 response.status_code == 200
                 or not retryable
                 or retry_number >= self.max_retries
-                or retry_delay_too_long
                 or not budget_remaining
             ):
                 break
-            delay = retry_after
+            delay = (
+                min(retry_after, MAX_RETRY_DELAY_SECONDS)
+                if retry_after is not None
+                else None
+            )
             if delay is None:
                 delay = min(2**retry_number, MAX_RETRY_DELAY_SECONDS)
                 delay += min(max(float(self._random()), 0.0), 1.0) * 0.25
-            self._sleep(delay)
+            self.governor.sleep(delay)
 
         assert response is not None
 
         if response.status_code != 200:
             if response.status_code == 429:
-                reason_code = "GEMINI_RATE_LIMITED"
+                safe_diagnostics = _safe_provider_diagnostics(response)
+                quota_ids = safe_diagnostics.get("quota_ids", [])
+                daily_quota = any(DAILY_QUOTA.search(value) for value in quota_ids)
+                reason_code = (
+                    "GEMINI_DAILY_QUOTA_EXHAUSTED"
+                    if daily_quota
+                    else "GEMINI_RATE_LIMITED"
+                )
             elif response.status_code == 401:
                 reason_code = "GEMINI_HTTP_401"
             elif response.status_code == 403:
@@ -351,11 +448,15 @@ class GeminiGlobalAiAnalysisAdapter:
                     "status_code": response.status_code,
                     "request_attempts": request_attempts,
                     "provider_requests_total": self.request_count,
-                    # After bounded 429 retries, further calls in this run are
-                    # stopped. This avoids turning a per-minute or per-day free
-                    # tier limit into dozens of guaranteed failed requests.
-                    "halt_provider_for_run": response.status_code == 429
-                    or budget_exhausted,
+                    # Authentication, daily quota, or the explicit request
+                    # budget halt the run. A minute quota failure remains
+                    # fail-soft after the one shared cooldown so later
+                    # candidates can still be attempted within the hard budget.
+                    "halt_provider_for_run": (
+                        response.status_code in {401, 403}
+                        or daily_quota
+                        or budget_exhausted
+                    ),
                     **_safe_provider_diagnostics(response),
                 },
             )

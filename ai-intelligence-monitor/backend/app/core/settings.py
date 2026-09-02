@@ -97,6 +97,24 @@ class Settings(BaseSettings):
         default="https://generativelanguage.googleapis.com/v1beta",
         validation_alias="GEMINI_BASE_URL",
     )
+    gemini_min_request_interval_seconds: float = Field(
+        default=4.1,
+        ge=0,
+        le=60,
+        validation_alias="GEMINI_MIN_REQUEST_INTERVAL_SECONDS",
+    )
+    gemini_rate_limit_cooldown_seconds: float = Field(
+        default=60.0,
+        ge=1,
+        le=120,
+        validation_alias="GEMINI_RATE_LIMIT_COOLDOWN_SECONDS",
+    )
+    gemini_max_run_seconds: float = Field(
+        default=2400.0,
+        ge=60,
+        le=2700,
+        validation_alias="GEMINI_MAX_RUN_SECONDS",
+    )
     searxng_image_digest: str = Field(
         default="UNVERIFIED",
         pattern=r"^(UNVERIFIED|sha256:[0-9a-f]{64})$",
