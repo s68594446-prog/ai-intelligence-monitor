@@ -37,18 +37,13 @@ def _endpoint(base_url: str, model: str) -> str:
     return f"{base_url.rstrip('/')}/models/{urllib.parse.quote(model, safe='-._')}"
 
 
-def probe_gemini() -> dict:
-    key = os.environ.get("GEMINI_API_KEY", "")
-    model = os.environ.get("GEMINI_ANALYSIS_MODEL", DEFAULT_MODEL)
-    base_url = os.environ.get("GEMINI_BASE_URL", DEFAULT_BASE_URL)
+def _probe_model(*, key: str, model: str, base_url: str) -> dict:
     result = {
         "target_model": model,
         "reachable": False,
         "auth": "NOT_CHECKED",
         "model_exists": False,
     }
-    if not key:
-        return {**result, "error": "SKIPPED_NO_SECRET"}
     try:
         url = _endpoint(base_url, model)
     except ValueError as exc:
@@ -84,6 +79,54 @@ def probe_gemini() -> dict:
         "model_exists": status == 200,
         "status": status,
         "elapsed_ms": round((time.monotonic() - start) * 1000),
+    }
+
+
+def probe_gemini() -> dict:
+    key = os.environ.get("GEMINI_API_KEY", "")
+    primary = os.environ.get("GEMINI_ANALYSIS_MODEL", DEFAULT_MODEL)
+    fallback = os.environ.get("GEMINI_FALLBACK_MODEL", "").strip()
+    fallback_enabled = os.environ.get(
+        "GEMINI_QUOTA_FALLBACK_ENABLED", "false"
+    ).strip().casefold() in {"1", "true", "yes", "on"}
+    base_url = os.environ.get("GEMINI_BASE_URL", DEFAULT_BASE_URL)
+    targets = [primary]
+    if fallback_enabled:
+        if not fallback:
+            return {
+                "target_models": targets,
+                "reachable": False,
+                "auth": "NOT_CHECKED",
+                "model_exists": False,
+                "error": "FALLBACK_MODEL_MISSING",
+            }
+        targets.append(fallback)
+    if not key:
+        return {
+            "target_models": targets,
+            "reachable": False,
+            "auth": "NOT_CHECKED",
+            "model_exists": False,
+            "error": "SKIPPED_NO_SECRET",
+        }
+    models = {
+        model: _probe_model(key=key, model=model, base_url=base_url)
+        for model in targets
+    }
+    return {
+        "target_model": primary,
+        "target_models": targets,
+        "fallback_enabled": fallback_enabled,
+        "reachable": all(item["reachable"] for item in models.values()),
+        "auth": (
+            "PASS"
+            if all(item["auth"] == "PASS" for item in models.values())
+            else "FAILED"
+            if any(item["auth"] == "FAILED" for item in models.values())
+            else "UNKNOWN"
+        ),
+        "model_exists": all(item["model_exists"] for item in models.values()),
+        "models": models,
     }
 
 

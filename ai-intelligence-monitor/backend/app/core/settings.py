@@ -86,12 +86,21 @@ class Settings(BaseSettings):
     gemini_api_key: SecretStr | None = Field(default=None, validation_alias="GEMINI_API_KEY")
     gemini_search_model: str = Field(default="gemini-2.5-flash", validation_alias="GEMINI_SEARCH_MODEL")
     # Phase 3C analysis is isolated from the manual OpenAI/DeepSeek provider
-    # selector above.  Flash-Lite may be selected explicitly through the same
-    # environment variable; there is deliberately no automatic model fallback.
+    # selector above. A lower Gemini model may be enabled explicitly for a
+    # per-model daily-quota transition; the actual models remain auditable.
     gemini_analysis_model: str = Field(
         default="gemini-3.5-flash",
         pattern=r"^[A-Za-z0-9._-]+$",
         validation_alias="GEMINI_ANALYSIS_MODEL",
+    )
+    gemini_fallback_model: str | None = Field(
+        default=None,
+        pattern=r"^[A-Za-z0-9._-]+$",
+        validation_alias="GEMINI_FALLBACK_MODEL",
+    )
+    gemini_quota_fallback_enabled: bool = Field(
+        default=False,
+        validation_alias="GEMINI_QUOTA_FALLBACK_ENABLED",
     )
     gemini_base_url: str = Field(
         default="https://generativelanguage.googleapis.com/v1beta",
@@ -189,6 +198,10 @@ class Settings(BaseSettings):
     )
     smtp_message_id_domain: str | None = Field(
         default=None, validation_alias="SMTP_MESSAGE_ID_DOMAIN"
+    )
+    smtp_configuration_prevalidated: bool = Field(
+        default=False,
+        validation_alias="SMTP_CONFIGURATION_PREVALIDATED",
     )
     analysis_prompt_path: Path = BACKEND_DIR / "app" / "prompts" / "analysis_v1.txt"
     red_team_prompt_path: Path = BACKEND_DIR / "app" / "prompts" / "red_team_v1.txt"

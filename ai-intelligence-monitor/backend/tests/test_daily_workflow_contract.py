@@ -57,6 +57,8 @@ def test_daily_workflow_uses_gemini_without_deepseek_fallback():
     assert "Gemini" in analysis["name"]
     assert analysis["env"]["GEMINI_API_KEY"] == "${{ secrets.GEMINI_API_KEY }}"
     assert "GEMINI_ANALYSIS_MODEL" in analysis["env"]
+    assert "GEMINI_FALLBACK_MODEL" in analysis["env"]
+    assert "GEMINI_QUOTA_FALLBACK_ENABLED" in analysis["env"]
     assert "GEMINI_BASE_URL" in analysis["env"]
     assert "DEEPSEEK_API_KEY" not in analysis["env"]
     assert analysis["run"].strip().startswith("python -m app.scripts.daily_global_ai")
@@ -73,9 +75,24 @@ def test_env_probe_only_receives_gemini_configuration():
     assert set(step["env"]) == {
         "GEMINI_API_KEY",
         "GEMINI_ANALYSIS_MODEL",
+        "GEMINI_FALLBACK_MODEL",
+        "GEMINI_QUOTA_FALLBACK_ENABLED",
         "GEMINI_BASE_URL",
     }
     assert step["env"]["GEMINI_API_KEY"] == "${{ secrets.GEMINI_API_KEY }}"
+
+
+def test_smtp_preflight_is_secret_scoped_and_analysis_gets_only_boolean():
+    steps = load_steps("daily-digest.yml")
+    preflight = next(step for step in steps if step.get("id") == "smtp-config")
+    analysis = next(step for step in steps if step.get("name", "").startswith("Run daily digest"))
+
+    assert preflight["run"] == "python -m app.scripts.validate_smtp_config"
+    assert "SMTP_PASSWORD" in preflight["env"]
+    assert "SMTP_PASSWORD" not in analysis["env"]
+    assert analysis["env"]["SMTP_CONFIGURATION_PREVALIDATED"] == (
+        "${{ steps.smtp-config.outputs.valid }}"
+    )
 
 
 def test_manual_daily_workflow_defaults_to_full_no_send_dry_run():

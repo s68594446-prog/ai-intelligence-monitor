@@ -206,6 +206,62 @@ class GeminiRequestGovernor:
         return True
 
 
+class GeminiModelController:
+    """Shared, explicit model state for all Phase 3C departments.
+
+    A switch is allowed only for the daily per-model free-tier quota and only
+    when the operator explicitly enabled and configured the fallback model.
+    The transition is immutable audit data; no provider or paid-model fallback
+    is inferred by the adapter.
+    """
+
+    def __init__(
+        self,
+        *,
+        primary_model: str,
+        fallback_model: str | None = None,
+        fallback_enabled: bool = False,
+    ):
+        if not MODEL_NAME.fullmatch(primary_model):
+            raise ValueError("GEMINI_ANALYSIS_MODEL is invalid")
+        if fallback_model and not MODEL_NAME.fullmatch(fallback_model):
+            raise ValueError("GEMINI_FALLBACK_MODEL is invalid")
+        if fallback_enabled and not fallback_model:
+            raise ValueError("enabled Gemini fallback requires GEMINI_FALLBACK_MODEL")
+        if fallback_model == primary_model:
+            raise ValueError("Gemini fallback model must differ from primary model")
+        self.primary_model = primary_model
+        self.fallback_model = fallback_model
+        self.fallback_enabled = fallback_enabled
+        self.active_model = primary_model
+        self.models_used: list[str] = []
+        self.transitions: list[dict[str, str]] = []
+
+    def record_request(self) -> str:
+        if self.active_model not in self.models_used:
+            self.models_used.append(self.active_model)
+        return self.active_model
+
+    def activate_quota_fallback(self, *, quota_id: str) -> bool:
+        if (
+            not self.fallback_enabled
+            or not self.fallback_model
+            or self.active_model != self.primary_model
+        ):
+            return False
+        previous = self.active_model
+        self.active_model = self.fallback_model
+        self.transitions.append(
+            {
+                "from_model": previous,
+                "to_model": self.active_model,
+                "reason_code": "GEMINI_DAILY_QUOTA_FALLBACK",
+                "quota_id": quota_id,
+            }
+        )
+        return True
+
+
 class GeminiGlobalAiAnalysisAdapter:
     name = "GeminiGlobalAiAnalysisAdapter"
     version = "gemini-global-ai-v1"
@@ -223,6 +279,7 @@ class GeminiGlobalAiAnalysisAdapter:
         max_retries: int = 2,
         max_provider_requests: int | None = None,
         governor: GeminiRequestGovernor | None = None,
+        model_controller: GeminiModelController | None = None,
         rate_limit_cooldown_seconds: float = 60.0,
         sleep_fn=time.sleep,
         random_fn=random.random,
@@ -253,10 +310,14 @@ class GeminiGlobalAiAnalysisAdapter:
                 f"prompt path/version mismatch: {expected_prompt_version} != {self.prompt_version}"
             )
 
-        self.model = model
-        self.endpoint = (
-            f"{base_url.rstrip('/')}/models/{quote(model, safe='-._')}:generateContent"
+        self.base_url = base_url.rstrip("/")
+        self.model_controller = model_controller or GeminiModelController(
+            primary_model=model
         )
+        if self.model_controller.primary_model != model:
+            raise ValueError("adapter model must match the shared controller primary model")
+        self.model = self.model_controller.active_model
+        self.endpoint = self._endpoint_for(self.model)
         self.instructions = Path(prompt_path).read_text(encoding="utf-8").strip()
         if supplemental_prompt_path is not None:
             supplemental = Path(supplemental_prompt_path).read_text(
@@ -275,6 +336,7 @@ class GeminiGlobalAiAnalysisAdapter:
         self.max_retries = max_retries
         self.max_provider_requests = max_provider_requests
         self.request_count = 0
+        self.models_used: list[str] = []
         self._sleep = sleep_fn
         self._random = random_fn
         self.governor = governor or GeminiRequestGovernor(
@@ -288,6 +350,13 @@ class GeminiGlobalAiAnalysisAdapter:
             transport=httpx.HTTPTransport(retries=0),
             trust_env=False,
         )
+
+    def _endpoint_for(self, model: str) -> str:
+        return f"{self.base_url}/models/{quote(model, safe='-._')}:generateContent"
+
+    def _sync_model(self) -> None:
+        self.model = self.model_controller.active_model
+        self.endpoint = self._endpoint_for(self.model)
 
     def close(self) -> None:
         if self._owns_client:
@@ -351,7 +420,11 @@ class GeminiGlobalAiAnalysisAdapter:
                         "halt_provider_for_run": True,
                     },
                 )
+            self._sync_model()
             self.governor.before_request()
+            request_model = self.model_controller.record_request()
+            if request_model not in self.models_used:
+                self.models_used.append(request_model)
             self.request_count += 1
             request_attempts += 1
             try:
@@ -388,6 +461,21 @@ class GeminiGlobalAiAnalysisAdapter:
                 self.max_provider_requests is None
                 or self.request_count < self.max_provider_requests
             )
+            if response.status_code == 429 and daily_quota and budget_remaining:
+                quota_id = next(
+                    (value for value in quota_ids if DAILY_QUOTA.search(value)),
+                    "DAILY_QUOTA",
+                )
+                if self.model_controller.activate_quota_fallback(quota_id=quota_id):
+                    self._sync_model()
+                    # The model switch has its own explicit, one-time budget and
+                    # does not consume the transient retry allowance. Re-entering
+                    # is bounded because the controller can switch only once.
+                    return self.analyze(
+                        metadata=metadata,
+                        raw_text=raw_text,
+                        source_url=source_url,
+                    )
             if (
                 response.status_code == 429
                 and not daily_quota

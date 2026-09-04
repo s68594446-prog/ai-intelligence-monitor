@@ -1,0 +1,8 @@
+DEPARTMENT: CHINA SUPPLY CHAIN
+VERSION: china-supply-chain-department-v1
+
+Apply the shared daily-global-ai-analysis-v9 rules without weakening or replacing them.
+Only analyze events whose actors, operating assets, policy jurisdiction, or directly affected companies are in mainland China, Hong Kong, or Chinese-controlled supply chains.
+Cover chips, memory, semiconductor equipment and materials, packaging, optics, servers, data centers, robotics, and evidence-backed domestic substitution.
+Exclude events assigned to the Global or Macro department. A Chinese-language publisher alone does not make an event Chinese.
+Do not use share-price performance, market popularity, or company fame as industrial evidence. Company mappings must be supported by supplied raw_text.

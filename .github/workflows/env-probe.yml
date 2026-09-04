@@ -16,6 +16,8 @@ jobs:
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_ANALYSIS_MODEL: ${{ vars.GEMINI_ANALYSIS_MODEL || 'gemini-3.5-flash' }}
+          GEMINI_FALLBACK_MODEL: ${{ vars.GEMINI_FALLBACK_MODEL || 'gemini-3.5-flash-lite' }}
+          GEMINI_QUOTA_FALLBACK_ENABLED: ${{ vars.GEMINI_QUOTA_FALLBACK_ENABLED || 'true' }}
           GEMINI_BASE_URL: ${{ vars.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta' }}
         run: python .github/scripts/env_probe.py
       - name: Upload probe report

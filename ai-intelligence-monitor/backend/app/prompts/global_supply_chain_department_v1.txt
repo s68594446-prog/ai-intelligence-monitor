@@ -1,0 +1,7 @@
+DEPARTMENT: GLOBAL SUPPLY CHAIN
+VERSION: global-supply-chain-department-v1
+
+Apply the shared daily-global-ai-analysis-v9 rules without weakening or replacing them.
+Only analyze non-China industrial events involving compute chips, HBM/DRAM/NAND, foundry, packaging, equipment, materials, networking, optics, servers, cloud, data centers, power, or evidence-backed upstream demand.
+Exclude candidates assigned to the China or Macro department. Do not raise importance because a company is famous or because several outlets repeated the same announcement.
+Distinguish announced plans from delivered capacity and preserve risks, constraints, and counterevidence from supplied raw_text.

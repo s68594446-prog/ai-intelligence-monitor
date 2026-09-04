@@ -8,6 +8,7 @@ from pydantic import SecretStr
 from app.core.settings import Settings
 from app.daily_ai.gemini_analysis import (
     GeminiGlobalAiAnalysisAdapter,
+    GeminiModelController,
     GeminiRequestGovernor,
     gemini_json_schema,
 )
@@ -458,3 +459,142 @@ def test_gemini_analysis_model_defaults_stable_and_flash_lite_is_explicit():
 
     assert default.gemini_analysis_model == "gemini-3.5-flash"
     assert lite.gemini_analysis_model == "gemini-3.5-flash-lite"
+    assert default.gemini_fallback_model is None
+    assert default.gemini_quota_fallback_enabled is False
+
+
+def test_daily_quota_switches_once_to_configured_lower_model_and_records_it():
+    seen_urls = []
+    quota = {
+        "error": {
+            "status": "RESOURCE_EXHAUSTED",
+            "details": [{
+                "violations": [{
+                    "quotaId": "GenerateRequestsPerDayPerProjectPerModel-FreeTier"
+                }]
+            }],
+        }
+    }
+
+    def handler(request):
+        seen_urls.append(str(request.url))
+        assert request.headers["x-goog-api-key"] == API_KEY
+        assert API_KEY not in str(request.url)
+        assert API_KEY.encode() not in request.content
+        if len(seen_urls) == 1:
+            return httpx.Response(429, json=quota)
+        return httpx.Response(200, json=response_for(valid_output()))
+
+    controller = GeminiModelController(
+        primary_model="gemini-3.5-flash",
+        fallback_model="gemini-3.5-flash-lite",
+        fallback_enabled=True,
+    )
+    analyzer = adapter(
+        handler,
+        model_controller=controller,
+        max_provider_requests=3,
+    )
+
+    result = analyzer.analyze(metadata={}, raw_text=RAW_TEXT, source_url=SOURCE_URL)
+
+    assert isinstance(result, GlobalAiAnalysisContract)
+    assert seen_urls[0].endswith("/models/gemini-3.5-flash:generateContent")
+    assert seen_urls[1].endswith("/models/gemini-3.5-flash-lite:generateContent")
+    assert controller.models_used == ["gemini-3.5-flash", "gemini-3.5-flash-lite"]
+    assert controller.transitions == [{
+        "from_model": "gemini-3.5-flash",
+        "to_model": "gemini-3.5-flash-lite",
+        "reason_code": "GEMINI_DAILY_QUOTA_FALLBACK",
+        "quota_id": "GenerateRequestsPerDayPerProjectPerModel-FreeTier",
+    }]
+    assert analyzer.request_count == 2
+
+
+def test_daily_quota_does_not_switch_when_fallback_is_disabled():
+    quota = {
+        "error": {
+            "status": "RESOURCE_EXHAUSTED",
+            "details": [{
+                "violations": [{
+                    "quotaId": "GenerateRequestsPerDayPerProjectPerModel-FreeTier"
+                }]
+            }],
+        }
+    }
+    controller = GeminiModelController(
+        primary_model="gemini-3.5-flash",
+        fallback_model="gemini-3.5-flash-lite",
+        fallback_enabled=False,
+    )
+    analyzer = adapter(
+        lambda request: httpx.Response(429, json=quota),
+        model_controller=controller,
+        max_provider_requests=2,
+    )
+
+    with pytest.raises(ProviderCallError) as caught:
+        analyzer.analyze(metadata={}, raw_text=RAW_TEXT, source_url=SOURCE_URL)
+
+    assert caught.value.diagnostics["reason_code"] == "GEMINI_DAILY_QUOTA_EXHAUSTED"
+    assert controller.transitions == []
+
+
+def test_fallback_daily_quota_stops_fail_closed_after_one_transition():
+    quota = {
+        "error": {
+            "status": "RESOURCE_EXHAUSTED",
+            "details": [{
+                "violations": [{
+                    "quotaId": "GenerateRequestsPerDayPerProjectPerModel-FreeTier"
+                }]
+            }],
+        }
+    }
+    controller = GeminiModelController(
+        primary_model="gemini-3.5-flash",
+        fallback_model="gemini-3.5-flash-lite",
+        fallback_enabled=True,
+    )
+    analyzer = adapter(
+        lambda request: httpx.Response(429, json=quota),
+        model_controller=controller,
+        max_provider_requests=3,
+    )
+
+    with pytest.raises(ProviderCallError) as caught:
+        analyzer.analyze(metadata={}, raw_text=RAW_TEXT, source_url=SOURCE_URL)
+
+    assert caught.value.diagnostics["reason_code"] == "GEMINI_DAILY_QUOTA_EXHAUSTED"
+    assert caught.value.diagnostics["halt_provider_for_run"] is True
+    assert analyzer.request_count == 2
+    assert len(controller.transitions) == 1
+
+
+def test_per_minute_quota_never_triggers_model_fallback():
+    quota = {
+        "error": {
+            "status": "RESOURCE_EXHAUSTED",
+            "details": [{
+                "violations": [{
+                    "quotaId": "GenerateRequestsPerMinutePerProjectPerModel-FreeTier"
+                }]
+            }],
+        }
+    }
+    controller = GeminiModelController(
+        primary_model="gemini-3.5-flash",
+        fallback_model="gemini-3.5-flash-lite",
+        fallback_enabled=True,
+    )
+    analyzer = adapter(
+        lambda request: httpx.Response(429, json=quota),
+        model_controller=controller,
+        max_provider_requests=2,
+    )
+
+    with pytest.raises(ProviderCallError):
+        analyzer.analyze(metadata={}, raw_text=RAW_TEXT, source_url=SOURCE_URL)
+
+    assert controller.active_model == "gemini-3.5-flash"
+    assert controller.transitions == []

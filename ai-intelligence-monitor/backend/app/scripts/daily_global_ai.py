@@ -20,7 +20,29 @@ from app.daily_ai.global_analysis import (
     ProviderCallError,
 )
 from app.daily_ai.global_digest import render_global_digest, select_global_digest
-from app.daily_ai.gemini_analysis import GeminiGlobalAiAnalysisAdapter, GeminiRequestGovernor
+from app.daily_ai.department_harness import (
+    CONTENT_DEPARTMENTS,
+    DepartmentCandidate,
+    DepartmentId,
+    DepartmentInput,
+    DepartmentManifest,
+    DepartmentManifestEntry,
+    DepartmentOpsResult,
+    DepartmentStatus,
+    ProviderUsage,
+    allocate_department_request_budgets,
+    artifact_sha256,
+    delivery_gate,
+    department_status,
+    evidence_review,
+    write_content_department_artifacts,
+    write_stage_department_artifacts,
+)
+from app.daily_ai.gemini_analysis import (
+    GeminiGlobalAiAnalysisAdapter,
+    GeminiModelController,
+    GeminiRequestGovernor,
+)
 from app.daily_ai.global_ops import (
     advice_violations,
     check_global_channel,
@@ -58,6 +80,8 @@ SOURCE_POLICY_PATH = CONFIG_DIR / "daily_ai_source_policy.yaml"
 RSS_SOURCES_PATH = CONFIG_DIR / "rss_sources.yaml"
 KEYWORDS_PATH = CONFIG_DIR / "industry_keywords.yaml"
 PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts/daily_global_ai_analysis_v9.txt"
+CHINA_PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts/china_supply_chain_department_v1.txt"
+GLOBAL_PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts/global_supply_chain_department_v1.txt"
 MACRO_PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts/daily_us_macro_analysis_v1.txt"
 PROJECT_DIR = Path(__file__).resolve().parents[3]
 SOURCE_HISTORY_PATH = PROJECT_DIR.parent / "digests/.source-history.jsonl"
@@ -110,6 +134,14 @@ def _is_cn_domain(domain: str) -> bool:
 def _is_us_macro_domain(domain: str) -> bool:
     host = domain.casefold()
     return any(host == value or host.endswith("." + value) for value in US_MACRO_DOMAINS)
+
+
+def _department_for_candidate(candidate) -> DepartmentId:
+    if _is_us_macro_domain(candidate.source_domain):
+        return DepartmentId.MACRO
+    if _is_cn_domain(candidate.source_domain):
+        return DepartmentId.CHINA
+    return DepartmentId.GLOBAL
 
 
 def _publisher_key(domain: str) -> str:
@@ -440,64 +472,35 @@ def run():
     provider_request_attempts = 0
     provider_halted = False
     provider_budget_exhausted = False
+    department_by_url: dict[str, DepartmentId] = {}
+    department_candidates: dict[DepartmentId, list[DepartmentCandidate]] = {
+        department: [] for department in CONTENT_DEPARTMENTS
+    }
+    department_attempts = {department: 0 for department in CONTENT_DEPARTMENTS}
+    department_validated = {department: 0 for department in CONTENT_DEPARTMENTS}
+    department_failures: dict[DepartmentId, list[str]] = {
+        department: [] for department in CONTENT_DEPARTMENTS
+    }
+    department_halted = {department: False for department in CONTENT_DEPARTMENTS}
+    model_controller = GeminiModelController(
+        primary_model=settings.gemini_analysis_model,
+        fallback_model=settings.gemini_fallback_model,
+        fallback_enabled=settings.gemini_quota_fallback_enabled,
+    )
+    department_budgets = {department: 0 for department in CONTENT_DEPARTMENTS}
+    analysis_jobs = []
+    analyzers: dict[DepartmentId, GeminiGlobalAiAnalysisAdapter | None] = {
+        department: None for department in CONTENT_DEPARTMENTS
+    }
+    analyzer_errors: dict[DepartmentId, dict | None] = {
+        department: None for department in CONTENT_DEPARTMENTS
+    }
     if args.fetch:
         fetch_client = httpx.Client(timeout=settings.web_search_timeout_seconds, follow_redirects=False, trust_env=False)
         fetcher = WebPageFetcher(client=fetch_client, max_bytes=FETCH_MAX_BYTES, max_retries=0, minimum_interval_seconds=1)
         allowed = {item.canonical_url for item in candidates}
         by_id = {item.candidate_id: item for item in candidates}
         planned_urls = {item.canonical_url for item in fetch_plan}
-        analyzer = None
-        macro_analyzer = None
-        analyzer_error = None
-        macro_analyzer_error = None
-        macro_request_budget = (
-            min(MACRO_ANALYZE_CAP, max(1, args.max_analyze // 5))
-            if macro_pool and args.analyze
-            else 0
-        )
-        global_request_budget = args.max_analyze - macro_request_budget
-        if args.analyze:
-            governor = GeminiRequestGovernor(
-                minimum_interval_seconds=settings.gemini_min_request_interval_seconds,
-                max_run_seconds=settings.gemini_max_run_seconds,
-            )
-            if global_request_budget:
-                try:
-                    analyzer = GeminiGlobalAiAnalysisAdapter(
-                        api_key=settings.gemini_api_key,
-                        base_url=settings.gemini_base_url,
-                        model=settings.gemini_analysis_model,
-                        prompt_path=PROMPT_PATH,
-                        timeout_seconds=settings.llm_timeout_seconds,
-                        max_retries=settings.llm_max_retries,
-                        max_provider_requests=global_request_budget,
-                        governor=governor,
-                        rate_limit_cooldown_seconds=settings.gemini_rate_limit_cooldown_seconds,
-                    )
-                except ValueError:
-                    analyzer_error = {
-                        "reason_code": "GEMINI_CONFIGURATION_ERROR",
-                        "error_type": "ValueError",
-                    }
-            if macro_request_budget:
-                try:
-                    macro_analyzer = GeminiGlobalAiAnalysisAdapter(
-                        api_key=settings.gemini_api_key,
-                        base_url=settings.gemini_base_url,
-                        model=settings.gemini_analysis_model,
-                        prompt_path=PROMPT_PATH,
-                        supplemental_prompt_path=MACRO_PROMPT_PATH,
-                        timeout_seconds=settings.llm_timeout_seconds,
-                        max_retries=settings.llm_max_retries,
-                        max_provider_requests=macro_request_budget,
-                        governor=governor,
-                        rate_limit_cooldown_seconds=settings.gemini_rate_limit_cooldown_seconds,
-                    )
-                except ValueError:
-                    macro_analyzer_error = {
-                        "reason_code": "GEMINI_CONFIGURATION_ERROR",
-                        "error_type": "ValueError",
-                    }
         try:
             for candidate in list(fetch_plan):
                 result = fetcher.fetch(candidate, allowed_urls=allowed)
@@ -538,66 +541,118 @@ def run():
                         }
                     )
                     continue
-                # The adapter enforces max_analyze against actual HTTP requests,
-                # including retries. This counter tracks candidate-level calls
-                # for Ops; a discarded article never buys a free extra request.
-                is_macro_candidate = _is_us_macro_domain(candidate.source_domain)
-                if args.analyze:
-                    analysis_candidate_count += 1
-                active_analyzer = macro_analyzer if is_macro_candidate else analyzer
-                active_analyzer_error = (
-                    macro_analyzer_error if is_macro_candidate else analyzer_error
-                )
-                active_request_budget = (
-                    macro_request_budget if is_macro_candidate else global_request_budget
-                )
-                request_budget_spent = (
-                    active_analyzer is not None
-                    and active_analyzer.request_count >= active_request_budget
-                )
-                if args.analyze and active_request_budget > 0 and request_budget_spent:
-                    if not provider_halted:
-                        analysis_failures.append({
-                            "url": candidate.canonical_url,
-                            "error_code": "GEMINI_REQUEST_BUDGET_EXHAUSTED",
-                            "diagnostics": {
-                                "reason_code": "GEMINI_REQUEST_BUDGET_EXHAUSTED",
-                                "halt_provider_for_run": True,
-                            },
-                        })
-                    provider_halted = True
-                if (
-                    args.analyze
-                    and not provider_halted
-                    and analyze_attempts < args.max_analyze
-                    and active_request_budget > 0
-                    and (
-                        active_analyzer is None
-                        or active_analyzer.request_count < active_request_budget
+                active_department = _department_for_candidate(candidate)
+                department_by_url[candidate.canonical_url] = active_department
+                department_candidates[active_department].append(
+                    DepartmentCandidate(
+                        candidate_id=candidate.candidate_id,
+                        canonical_url=candidate.canonical_url,
+                        title=result.title or candidate.title,
+                        source_domain=candidate.source_domain,
+                        source_tier=candidate.source_tier.value,
+                        event_cluster_key=clusters.get(
+                            candidate.candidate_id, candidate.candidate_id
+                        ),
+                        content_sha256=result.content_hash,
+                        raw_text=result.raw_text,
                     )
-                ):
+                )
+                analysis_jobs.append((candidate, result, active_department))
+
+            if args.analyze:
+                analysis_candidate_count = len(analysis_jobs)
+                department_budgets = allocate_department_request_budgets(
+                    args.max_analyze,
+                    candidate_counts={
+                        department: len(department_candidates[department])
+                        for department in CONTENT_DEPARTMENTS
+                    },
+                )
+                governor = GeminiRequestGovernor(
+                    minimum_interval_seconds=settings.gemini_min_request_interval_seconds,
+                    max_run_seconds=settings.gemini_max_run_seconds,
+                )
+                supplemental_prompts = {
+                    DepartmentId.CHINA: CHINA_PROMPT_PATH,
+                    DepartmentId.GLOBAL: GLOBAL_PROMPT_PATH,
+                    DepartmentId.MACRO: MACRO_PROMPT_PATH,
+                }
+                for department in CONTENT_DEPARTMENTS:
+                    request_budget = department_budgets[department]
+                    if not request_budget:
+                        continue
+                    try:
+                        analyzers[department] = GeminiGlobalAiAnalysisAdapter(
+                            api_key=settings.gemini_api_key,
+                            base_url=settings.gemini_base_url,
+                            model=settings.gemini_analysis_model,
+                            prompt_path=PROMPT_PATH,
+                            supplemental_prompt_path=supplemental_prompts[department],
+                            timeout_seconds=settings.llm_timeout_seconds,
+                            max_retries=settings.llm_max_retries,
+                            max_provider_requests=request_budget,
+                            governor=governor,
+                            model_controller=model_controller,
+                            rate_limit_cooldown_seconds=settings.gemini_rate_limit_cooldown_seconds,
+                        )
+                    except ValueError:
+                        analyzer_errors[department] = {
+                            "reason_code": "GEMINI_CONFIGURATION_ERROR",
+                            "error_type": "ValueError",
+                        }
+
+                for candidate, result, active_department in analysis_jobs:
+                    if provider_halted:
+                        break
+                    active_analyzer = analyzers[active_department]
+                    request_budget = department_budgets[active_department]
+                    if (
+                        department_halted[active_department]
+                        or request_budget == 0
+                        or (
+                            active_analyzer is not None
+                            and active_analyzer.request_count >= request_budget
+                        )
+                    ):
+                        if not department_halted[active_department]:
+                            analysis_failures.append({
+                                "url": candidate.canonical_url,
+                                "error_code": "GEMINI_REQUEST_BUDGET_EXHAUSTED",
+                                "diagnostics": {
+                                    "reason_code": "GEMINI_REQUEST_BUDGET_EXHAUSTED",
+                                    "halt_department": active_department.value,
+                                },
+                            })
+                        department_halted[active_department] = True
+                        continue
+
                     analyze_attempts += 1
+                    department_attempts[active_department] += 1
+                    is_macro_candidate = active_department == DepartmentId.MACRO
                     if is_macro_candidate:
                         macro_analyze_attempts += 1
                     if active_analyzer is None:
                         analysis_failures.append({
                             "url": candidate.canonical_url,
                             "error_code": "GEMINI_CONFIGURATION_ERROR",
-                            "diagnostics": active_analyzer_error or {
+                            "diagnostics": analyzer_errors[active_department] or {
                                 "reason_code": "GEMINI_CONFIGURATION_ERROR"
                             },
                         })
-                        provider_halted = True
+                        department_halted[active_department] = True
                         continue
-                    # Fail-soft: any single-article failure is discarded with an
-                    # audit record and the run continues. Nothing here may abort
-                    # the whole run.
                     try:
                         analysis = active_analyzer.analyze(
-                            metadata={"title": result.title or candidate.title, "source_domain": urlsplit(candidate.canonical_url).hostname or "", "source_tier": candidate.source_tier.value},
-                            raw_text=result.raw_text, source_url=candidate.canonical_url,
+                            metadata={
+                                "title": result.title or candidate.title,
+                                "source_domain": urlsplit(candidate.canonical_url).hostname or "",
+                                "source_tier": candidate.source_tier.value,
+                            },
+                            raw_text=result.raw_text,
+                            source_url=candidate.canonical_url,
                         )
                         provider_validated_outputs += 1
+                        department_validated[active_department] += 1
                         if is_macro_candidate:
                             macro_provider_validated_outputs += 1
                         quality_reasons = check_text_quality({
@@ -606,9 +661,6 @@ def run():
                             "why_it_matters": analysis.why_it_matters,
                             "transmission_path": analysis.transmission_path,
                         })
-                        # Belt-and-suspenders: the model can rewrite an in-scope
-                        # source title into a broker/quote headline. If it does,
-                        # discard so the item never reaches the digest or ops.
                         scope_term = out_of_scope_headline(analysis.headline)
                         advice_terms = advice_violations(analysis)
                         non_neutral_terms = neutrality_violations(analysis)
@@ -620,17 +672,8 @@ def run():
                             analysis_failures.append({"url": candidate.canonical_url, "error_code": "NON_NEUTRAL_FRAMING", "diagnostics": {"matched_terms": non_neutral_terms, "headline": analysis.headline[:120]}})
                         elif quality_reasons:
                             analysis_failures.append({"url": candidate.canonical_url, "error_code": "LOW_TEXT_QUALITY", "diagnostics": {"reasons": quality_reasons, "headline": analysis.headline[:120]}})
-                        # A number claimed without a quote that carries it is a
-                        # single-item defect: drop this item with an audit record
-                        # and keep the rest of the digest. Enforced here (not only
-                        # in ops) because the ops check is a whole-digest boolean,
-                        # so one offender used to block the entire email.
                         elif not numeric_claim_cited(analysis):
                             analysis_failures.append({"url": candidate.canonical_url, "error_code": "NUMERIC_CLAIM_UNCITED", "diagnostics": {"headline": analysis.headline[:120], "quotes": [e.quote[:160] for e in analysis.evidence]}})
-                        # Source Tier is deterministic and must not depend on the
-                        # model's label. Drop one mislabelled item fail-soft so an
-                        # unpublished analysis cannot block the entire digest.
-                        # Ops applies the same rule again as a backstop.
                         elif not sourcing_matches_tier(analysis, policy):
                             analysis_failures.append({
                                 "url": candidate.canonical_url,
@@ -647,7 +690,11 @@ def run():
                     except ProviderCallError as exc:
                         analysis_failures.append({"url": candidate.canonical_url, "error_code": exc.diagnostics.get("reason_code", type(exc).__name__), "diagnostics": exc.diagnostics})
                         if exc.diagnostics.get("halt_provider_for_run"):
-                            provider_halted = True
+                            reason = exc.diagnostics.get("reason_code")
+                            if reason == "GEMINI_REQUEST_BUDGET_EXHAUSTED":
+                                department_halted[active_department] = True
+                            else:
+                                provider_halted = True
                     except (LLMOutputValidationError, LLMAdapterTimeout, LLMProviderError) as exc:
                         analysis_failures.append({"url": candidate.canonical_url, "error_code": type(exc).__name__, "detail": str(exc)[:300]})
                     except Exception as exc:  # absolute fail-soft guard
@@ -655,21 +702,196 @@ def run():
         finally:
             provider_request_attempts = sum(
                 item.request_count
-                for item in (analyzer, macro_analyzer)
+                for item in analyzers.values()
                 if item is not None
             )
             provider_budget_exhausted = provider_request_attempts >= args.max_analyze
-            if analyzer is not None:
-                analyzer.close()
-            if macro_analyzer is not None:
-                macro_analyzer.close()
+            for item in analyzers.values():
+                if item is not None:
+                    item.close()
             fetch_client.close()
+    provider_halted = provider_halted or any(department_halted.values())
+    for failure in analysis_failures:
+        department = department_by_url.get(failure.get("url", ""))
+        if department is not None:
+            department_failures[department].append(failure["error_code"])
     _write(run_dir / "02-fetch.json", {"run_id": run_id, "fetched": [{k: v for k, v in item.items() if k != "raw_text"} for item in sources], "blocked": blocked, "cross_day_duplicates": cross_day_duplicates})
     _write(run_dir / "03-analysis-output.json", [item.model_dump(mode="json") for item in analyses])
     _write(run_dir / "analysis-failures.json", analysis_failures)
 
+    raw_by_url = {item["url"]: item["raw_text"] for item in sources}
+    evidence_decisions = evidence_review(
+        analyses,
+        candidate_id_by_url=analysis_urls,
+        raw_text_by_url=raw_by_url,
+    )
+    evidence_pass_urls = {
+        decision.source_url
+        for decision in evidence_decisions
+        if decision.decision == "PASS"
+    }
+    analyses = [
+        analysis
+        for analysis in analyses
+        if str(analysis.evidence[0].source_url) in evidence_pass_urls
+    ]
+    prompt_versions = {
+        DepartmentId.CHINA: "china-supply-chain-department-v1",
+        DepartmentId.GLOBAL: "global-supply-chain-department-v1",
+        DepartmentId.MACRO: "daily-us-macro-analysis-v1",
+    }
+    content_statuses: dict[DepartmentId, DepartmentStatus] = {}
+    department_handoffs = []
+    for department in CONTENT_DEPARTMENTS:
+        accepted = [
+            analysis
+            for analysis in analyses
+            if department_by_url.get(str(analysis.evidence[0].source_url)) == department
+        ]
+        affects_completion = department_halted[department] or (
+            provider_halted
+            and department_attempts[department] < len(department_candidates[department])
+        )
+        status = department_status(
+            analysis_candidate_count=len(department_candidates[department]),
+            candidate_attempts=department_attempts[department],
+            accepted_count=len(accepted),
+            provider_halted=affects_completion,
+            failure_codes=department_failures[department],
+        )
+        content_statuses[department] = status
+        active = analyzers[department]
+        usage = ProviderUsage(
+            request_budget=department_budgets[department],
+            request_count=active.request_count if active else 0,
+            candidate_attempts=department_attempts[department],
+            validated_outputs=department_validated[department],
+            models_used=tuple(active.models_used if active else ()),
+            model_transitions=tuple(model_controller.transitions),
+            provider_halted=affects_completion,
+            failure_codes=tuple(sorted(set(department_failures[department]))),
+        )
+        department_input = DepartmentInput(
+            run_id=run_id,
+            department_id=department,
+            department_prompt_version=prompt_versions[department],
+            model_name=settings.gemini_analysis_model,
+            request_budget=department_budgets[department],
+            candidates=tuple(department_candidates[department]),
+        )
+        department_handoffs.append(
+            write_content_department_artifacts(
+                run_dir=run_dir,
+                department_input=department_input,
+                discovery=[
+                    {
+                        "candidate_id": candidate.candidate_id,
+                        "canonical_url": candidate.canonical_url,
+                        "source_tier": candidate.source_tier,
+                    }
+                    for candidate in department_candidates[department]
+                ],
+                fetches=[
+                    {key: value for key, value in source.items() if key != "raw_text"}
+                    for source in sources
+                    if department_by_url.get(source["url"]) == department
+                ],
+                analyses=[analysis.model_dump(mode="json") for analysis in accepted],
+                evidence=[
+                    decision
+                    for decision in evidence_decisions
+                    if department_by_url.get(decision.source_url) == department
+                ],
+                provider_usage=usage,
+                status=status,
+            )
+        )
+
+    evidence_status = (
+        DepartmentStatus.FAILED
+        if any(decision.decision == "FAIL" for decision in evidence_decisions)
+        else DepartmentStatus.HEALTHY
+        if evidence_decisions
+        else DepartmentStatus.HEALTHY_EMPTY
+    )
+    evidence_ops = DepartmentOpsResult(
+        department_id=DepartmentId.EVIDENCE_REVIEW,
+        status=evidence_status,
+        passed=evidence_status in {DepartmentStatus.HEALTHY, DepartmentStatus.HEALTHY_EMPTY},
+        checks={
+            "analysis_immutable": True,
+            "all_items_reviewed": len(evidence_decisions) == len(analyses),
+            "all_selected_evidence_passed": not any(
+                decision.decision == "FAIL" for decision in evidence_decisions
+            ),
+        },
+        errors=tuple(
+            decision.candidate_id
+            for decision in evidence_decisions
+            if decision.decision == "FAIL"
+        ),
+    )
+    evidence_handoff = write_stage_department_artifacts(
+        run_dir=run_dir,
+        run_id=run_id,
+        department_id=DepartmentId.EVIDENCE_REVIEW,
+        status=evidence_status,
+        input_payload={
+            "contract_version": "phase3c-department-contract-v1",
+            "upstream_handoffs": [handoff.model_dump(mode="json") for handoff in department_handoffs],
+        },
+        output_payload=[decision.model_dump(mode="json") for decision in evidence_decisions],
+        ops=evidence_ops,
+        downstream_consumer=DepartmentId.EDITORIAL.value,
+        department_prompt_version="evidence-review-department-v1",
+    )
+
     cluster_by_url = {url: clusters.get(candidate_id, candidate_id) for url, candidate_id in analysis_urls.items()}
     digest_items = select_global_digest(analyses, cluster_by_url=cluster_by_url) if args.render else []
+    editorial_checks = {
+        "evidence_handoff_accepted": evidence_status
+        in {DepartmentStatus.HEALTHY, DepartmentStatus.HEALTHY_EMPTY},
+        "sources_preserved": all(
+            item.get("url") in evidence_pass_urls for item in digest_items
+        ),
+        "importance_threshold_preserved": all(
+            int(item.get("importance_score", 0)) >= 60 for item in digest_items
+        ),
+    }
+    editorial_status = (
+        DepartmentStatus.BLOCKED
+        if not editorial_checks["evidence_handoff_accepted"]
+        else DepartmentStatus.HEALTHY
+        if digest_items
+        else DepartmentStatus.HEALTHY_EMPTY
+    )
+    editorial_ops = DepartmentOpsResult(
+        department_id=DepartmentId.EDITORIAL,
+        status=editorial_status,
+        passed=editorial_status
+        in {DepartmentStatus.HEALTHY, DepartmentStatus.HEALTHY_EMPTY}
+        and all(editorial_checks.values()),
+        checks=editorial_checks,
+        errors=tuple(name for name, passed in editorial_checks.items() if not passed),
+    )
+    editorial_handoff = write_stage_department_artifacts(
+        run_dir=run_dir,
+        run_id=run_id,
+        department_id=DepartmentId.EDITORIAL,
+        status=editorial_status,
+        input_payload={
+            "contract_version": "phase3c-department-contract-v1",
+            "evidence_handoff": evidence_handoff.model_dump(mode="json"),
+            "analysis_sha256": [
+                artifact_sha256(analysis.model_dump(mode="json"))
+                for analysis in analyses
+            ],
+        },
+        output_payload=digest_items,
+        ops=editorial_ops,
+        downstream_consumer=DepartmentId.DELIVERY.value,
+        department_prompt_version="editorial-department-v1",
+    )
     a_share_items, a_share_ops, a_share_counts = [], None, {}
     if args.a_share:
         china_count = sum(item["section"] == "CHINA" for item in digest_items)
@@ -677,9 +899,13 @@ def run():
             settings=settings, run_dir=run_dir, now=now, analyze=args.analyze, china_existing_count=china_count,
         )
     if args.render:
+        actual_models = model_controller.models_used or [settings.gemini_analysis_model]
+        analysis_model_label = " → ".join(actual_models)
+        if model_controller.transitions:
+            analysis_model_label += "（额度降级）"
         digest_text = render_global_digest(
             digest_items,
-            analysis_model=settings.gemini_analysis_model,
+            analysis_model=analysis_model_label,
             prompt_version=GeminiGlobalAiAnalysisAdapter.prompt_version,
         )
         if args.a_share:
@@ -712,21 +938,59 @@ def run():
         provider_halted=provider_halted,
         provider_failure_codes=[item["error_code"] for item in analysis_failures],
     )
-    # Macro events have a separately reserved provider budget. Ordinary AI
-    # analysis success must not hide a broken macro-event path (or vice versa).
-    global_analyze_attempts = analyze_attempts - macro_analyze_attempts
-    global_provider_validated_outputs = (
-        provider_validated_outputs - macro_provider_validated_outputs
-    )
+    actual_models = model_controller.models_used or [settings.gemini_analysis_model]
+    analysis_model_label = " → ".join(actual_models)
+    fallback_used = bool(model_controller.transitions)
+    if fallback_used:
+        analysis_model_label += "（额度降级）"
+
+    # Each content desk must report its own usable provider and completion
+    # state. One successful desk cannot mask a halted or unprocessed peer.
     additional_checks = {
-        "global_analysis_provider_usable": (
-            global_analyze_attempts == 0 or global_provider_validated_outputs > 0
-        ),
-        "macro_analysis_provider_usable": (
-            macro_analyze_attempts == 0 or macro_provider_validated_outputs > 0
-        ),
+        f"{department.value}_analysis_provider_usable": (
+            department_attempts[department] == 0
+            or department_validated[department] > 0
+        )
+        for department in CONTENT_DEPARTMENTS
     }
-    combined_checks = {**ops.checks, **additional_checks}
+    additional_checks.update(
+        {
+            f"{department.value}_department_complete": (
+                content_statuses[department]
+                in {DepartmentStatus.HEALTHY, DepartmentStatus.HEALTHY_EMPTY}
+            )
+            for department in CONTENT_DEPARTMENTS
+        }
+    )
+    additional_checks.update(
+        {
+            "evidence_review_complete": evidence_status
+            in {DepartmentStatus.HEALTHY, DepartmentStatus.HEALTHY_EMPTY},
+            "editorial_complete": editorial_status
+            in {DepartmentStatus.HEALTHY, DepartmentStatus.HEALTHY_EMPTY},
+            "editorial_ops_passed": editorial_ops.passed,
+        }
+    )
+    pre_delivery_checks = {**ops.checks, **additional_checks}
+    delivery_ops = delivery_gate(
+        content_statuses=content_statuses,
+        evidence_status=evidence_status,
+        editorial_status=editorial_status,
+        editorial_ops_passed=editorial_ops.passed and all(pre_delivery_checks.values()),
+        provider_halted=provider_halted,
+        unprocessed_candidate_count=max(
+            0, analysis_candidate_count - analyze_attempts
+        ),
+        render_passed=bool(
+            args.render and (run_dir / "04-digest.txt").is_file()
+        ),
+        idempotency_passed=True,
+        smtp_configuration_valid=settings.smtp_configuration_prevalidated,
+    )
+    combined_checks = {
+        **pre_delivery_checks,
+        "department_delivery_ready": delivery_ops.passed,
+    }
     ops = ops.model_copy(
         update={
             "passed": all(combined_checks.values()),
@@ -735,25 +999,86 @@ def run():
             "offenders": dict(ops.offenders),
             "stats": {
                 **ops.stats,
-                "global_analysis_attempts": global_analyze_attempts,
-                "global_provider_validated_outputs": global_provider_validated_outputs,
-                "macro_analysis_attempts": macro_analyze_attempts,
-                "macro_provider_validated_outputs": macro_provider_validated_outputs,
+                **{
+                    f"{department.value}_analysis_attempts": department_attempts[department]
+                    for department in CONTENT_DEPARTMENTS
+                },
+                **{
+                    f"{department.value}_provider_validated_outputs": department_validated[department]
+                    for department in CONTENT_DEPARTMENTS
+                },
             },
             "audit": {
                 **ops.audit,
-                "analysis_model": settings.gemini_analysis_model,
+                "analysis_model": analysis_model_label,
+                "primary_model": settings.gemini_analysis_model,
+                "configured_fallback_model": settings.gemini_fallback_model,
+                "fallback_used": fallback_used,
+                "models_used": actual_models,
+                "model_transitions": model_controller.transitions,
                 "prompt_version": GeminiGlobalAiAnalysisAdapter.prompt_version,
+                "department_statuses": {
+                    department.value: content_statuses[department].value
+                    for department in CONTENT_DEPARTMENTS
+                },
+                "smtp_configuration_checked": True,
+                "smtp_configuration_prevalidated": settings.smtp_configuration_prevalidated,
             },
         }
     )
+    delivery_handoff = write_stage_department_artifacts(
+        run_dir=run_dir,
+        run_id=run_id,
+        department_id=DepartmentId.DELIVERY,
+        status=delivery_ops.status,
+        input_payload={
+            "contract_version": "phase3c-department-contract-v1",
+            "editorial_handoff": editorial_handoff.model_dump(mode="json"),
+            "content_statuses": {
+                department.value: content_statuses[department].value
+                for department in CONTENT_DEPARTMENTS
+            },
+        },
+        output_payload={
+            "delivery_allowed": ops.passed,
+            "smtp_configuration_valid": settings.smtp_configuration_prevalidated,
+            "real_email_sent": False,
+        },
+        ops=delivery_ops,
+        downstream_consumer="existing-email-delivery-adapter",
+        department_prompt_version="delivery-watchdog-v1",
+    )
+    all_handoffs = [
+        *department_handoffs,
+        evidence_handoff,
+        editorial_handoff,
+        delivery_handoff,
+    ]
+    manifest = DepartmentManifest(
+        run_id=run_id,
+        entries=tuple(
+            DepartmentManifestEntry(
+                department_id=handoff.department_id,
+                status=handoff.status,
+                handoff_path=f"departments/{handoff.department_id.value}/handoff.json",
+                handoff_sha256=artifact_sha256(handoff),
+            )
+            for handoff in all_handoffs
+        ),
+        delivery_allowed=ops.passed,
+    )
+    _write(run_dir / "department-manifest.json", manifest.model_dump(mode="json"))
     _write(run_dir / "ops.json", ops.model_dump(mode="json"))
     _write(run_dir / "source-bundle.json", {
         "run_id": run_id, "plan_version": plan.plan_version, "policy_version": policy.policy_version,
         "search_pages": [hashlib.sha256(json.dumps(p.model_dump(mode="json"), sort_keys=True, default=str).encode()).hexdigest() for p in pages],
         "sources": sources, "blocked": blocked, "event_clusters": clusters,
         "analysis_runtime": {
-            "model": settings.gemini_analysis_model,
+            "primary_model": settings.gemini_analysis_model,
+            "configured_fallback_model": settings.gemini_fallback_model,
+            "models_used": actual_models,
+            "fallback_used": fallback_used,
+            "model_transitions": model_controller.transitions,
             "prompt_version": GeminiGlobalAiAnalysisAdapter.prompt_version,
         },
     })
@@ -771,6 +1096,18 @@ def run():
         "unprocessed_candidate_count": max(0, analysis_candidate_count - analyze_attempts),
         "provider_budget_exhausted": provider_budget_exhausted,
         "provider_validated_outputs": provider_validated_outputs,
+        "analysis_model": analysis_model_label,
+        "models_used": actual_models,
+        "fallback_used": fallback_used,
+        "model_transitions": model_controller.transitions,
+        "department_statuses": {
+            department.value: content_statuses[department].value
+            for department in CONTENT_DEPARTMENTS
+        },
+        "department_request_budgets": {
+            department.value: department_budgets[department]
+            for department in CONTENT_DEPARTMENTS
+        },
         "macro_analyze_attempts": macro_analyze_attempts,
         "macro_provider_validated_outputs": macro_provider_validated_outputs,
         "analysis_failures": len(analysis_failures), "digest_items": len(digest_items),

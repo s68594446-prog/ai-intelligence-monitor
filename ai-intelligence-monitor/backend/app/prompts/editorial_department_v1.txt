@@ -1,0 +1,5 @@
+DEPARTMENT: EDITORIAL
+VERSION: editorial-department-v1
+
+Consume only evidence-PASS immutable handoffs. Perform deterministic cross-department event deduplication, importance_score ordering, sector-cap enforcement, China hardware floor, and total-limit enforcement.
+Do not create facts, companies, sources, evidence, transmission paths, or scores. Do not lower the importance threshold or copy items between departments to fill space.

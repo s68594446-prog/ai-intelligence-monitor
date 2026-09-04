@@ -63,17 +63,20 @@ names any offender. It never promotes a retelling, weakens the T1/T2 policy, or
 changes the frozen Evidence Gate.
 
 Phase 3C analysis uses the official Gemini GenerateContent API with
-`daily_global_ai_analysis_v8.txt` as its unchanged system instruction. The
-default stable model is `gemini-3.5-flash`; `gemini-3.5-flash-lite` is an
-explicit configuration option, not an automatic fallback. The API key is sent
+`daily_global_ai_analysis_v9.txt` as its shared system instruction. The
+default stable model is `gemini-3.5-flash`; `gemini-3.5-flash-lite` can be
+configured as a one-time, explicitly enabled lower-model transition for a
+per-model daily quota. The actual model chain is disclosed in the digest and
+audit. The API key is sent
 only in the `x-goog-api-key` header. Search Grounding and all other tools are
 absent from the request, and Gemini output must still pass the existing
 Pydantic, exact quote/URL, numeric citation, Source Tier, advice-language,
 market-action, and Digest Ops checks. Transient 429/5xx responses receive
-bounded, request-budget-aware retries. A final 429 is recorded with allowlisted
-quota metadata and halts further Gemini calls for that run instead of burning
-the rest of the free-tier budget. It never switches to DeepSeek or a paid model
-automatically. Published canonical URLs and content SHA-256 values are retained
+bounded, request-budget-aware retries. A per-minute quota receives one bounded
+cooldown; a daily quota may switch once only when the lower model and toggle are
+both configured. If that transition is unavailable or also exhausted, the run
+halts and fails closed. It never switches to DeepSeek or a paid model.
+Published canonical URLs and content SHA-256 values are retained
 for three-day cross-run deduplication; raw source text is not retained in that
 history, and changed content at the same URL remains eligible for analysis.
 

@@ -61,6 +61,21 @@ def test_text_digest_carries_runtime_model_and_prompt_metadata():
     assert "分析元数据：Gemini 3.5 Flash · Prompt v9" in rendered
 
 
+def test_text_digest_discloses_quota_fallback_model_chain():
+    rendered = render_global_digest(
+        [],
+        analysis_model=(
+            "gemini-3.5-flash → gemini-3.5-flash-lite（额度降级）"
+        ),
+        prompt_version="daily-global-ai-analysis-v9",
+    )
+
+    assert (
+        "Gemini 3.5 Flash → Gemini 3.5 Flash Lite（额度降级）"
+        in rendered
+    )
+
+
 def test_same_company_safety_incident_is_clustered_across_different_wording():
     texts = {
         "a": "OpenAI因智能体越狱及安全风险暂停前沿模型Astra大量训练工作",
