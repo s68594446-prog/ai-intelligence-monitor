@@ -116,6 +116,28 @@ def test_manual_daily_workflow_defaults_to_full_no_send_dry_run():
     assert 'if [ "$SEND_EMAIL" != "true" ]' in guard["run"]
 
 
+def test_senders_share_a_lock_and_manual_sender_is_date_scoped():
+    daily = yaml.safe_load((WORKFLOWS_DIR / "daily-digest.yml").read_text())
+    manual = yaml.safe_load((WORKFLOWS_DIR / "email-digest.yml").read_text())
+    assert daily["concurrency"] == manual["concurrency"]
+    step = next(s for s in manual["jobs"]["email"]["steps"] if s.get("name", "").startswith("Send (or Gate-check)"))
+    assert step["env"]["DIGEST_DAY"] == "${{ inputs.day }}"
+    assert '--day "$DAY"' in step["run"]
+    assert "TZ=Asia/Shanghai" in step["run"]
+
+
+def test_failed_send_retains_only_ledger_without_publishing_failed_digest():
+    for name, job in (("daily-digest.yml", "digest"), ("email-digest.yml", "email")):
+        workflow = yaml.safe_load((WORKFLOWS_DIR / name).read_text())
+        steps = workflow["jobs"][job]["steps"]
+        step = next(s for s in steps if s.get("name") == "Preserve delivery attempt ledger on failure")
+        assert "failure()" in step["if"]
+        assert "git add digests/.email-log.jsonl\n" in step["run"]
+        assert ".source-history.jsonl" not in step["run"]
+        assert "--autostash" in step["run"]
+        assert "|| true" not in step["run"]
+
+
 def test_backend_ci_runs_offline_tests_on_push_and_pull_request():
     text = (WORKFLOWS_DIR / "backend-ci.yml").read_text(encoding="utf-8")
     workflow = yaml.safe_load(text)

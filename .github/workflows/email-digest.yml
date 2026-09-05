@@ -1,7 +1,7 @@
 name: email-digest
 
-# Manual test-send only. This does NOT re-run discovery/analysis — it emails
-# the latest already-committed digest in digests/. Scheduled generation and
+# Manual controlled delivery. This does NOT re-run discovery/analysis — it emails
+# the requested date's committed digest in digests/. Scheduled generation and
 # auto-send are handled separately by daily-digest.yml.
 on:
   workflow_dispatch:
@@ -10,12 +10,16 @@ on:
         description: "Actually send (true) or Gate dry-run only (false)"
         type: boolean
         default: false
+      day:
+        description: "Digest date YYYY-MM-DD (blank means today in Asia/Shanghai)"
+        type: string
+        default: ""
 
 permissions:
   contents: write
 
 concurrency:
-  group: email-digest
+  group: daily-digest
   cancel-in-progress: false
 
 jobs:
@@ -32,9 +36,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e .
-      - name: Send (or Gate-check) latest digest email
+      - name: Send (or Gate-check) dated digest email
         working-directory: ai-intelligence-monitor/backend
         env:
+          DIGEST_DAY: ${{ inputs.day }}
           EMAIL_DELIVERY_ENABLED: "true"
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
           SMTP_PORT: ${{ secrets.SMTP_PORT }}
@@ -44,11 +49,24 @@ jobs:
           SMTP_FROM: ${{ secrets.SMTP_FROM }}
           SMTP_TO: ${{ secrets.SMTP_TO }}
         run: |
+          DAY="${DIGEST_DAY:-$(TZ=Asia/Shanghai date +%F)}"
           if [ "${{ inputs.send }}" = "true" ]; then
-            python -m app.scripts.send_digest_email --send
+            python -m app.scripts.send_digest_email --day "$DAY" --send
           else
-            python -m app.scripts.send_digest_email
+            python -m app.scripts.send_digest_email --day "$DAY"
           fi
+      - name: Preserve delivery attempt ledger on failure
+        if: failure() && inputs.send == true
+        run: |
+          if [ -z "$(git status --porcelain -- digests/.email-log.jsonl)" ]; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add digests/.email-log.jsonl
+          git commit -m "email: preserve failed or uncertain delivery attempt"
+          git pull --rebase --autostash origin main
+          git push origin main
       - name: Commit send ledger
         if: ${{ inputs.send }}
         run: |

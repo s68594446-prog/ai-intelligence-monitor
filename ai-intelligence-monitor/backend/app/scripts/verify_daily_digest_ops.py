@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 
 from app.core.settings import Settings
+from app.daily_ai.ops_report import report_passed
 
 
 def verify_latest_ops(runs_dir: Path) -> dict:
@@ -26,9 +27,15 @@ def verify_latest_ops(runs_dir: Path) -> dict:
             "ops_path": str(ops_path),
         }
 
+    if not isinstance(ops, dict) or not isinstance(ops.get("errors", []), list) or not isinstance(ops.get("offenders", {}), dict):
+        return {"passed": False, "errors": ["OPS_RESULT_INVALID"], "offenders": {}, "ops_path": str(ops_path)}
+    passed = report_passed(ops)
+    errors = list(ops.get("errors", []))
+    if not passed and not errors:
+        errors = ["OPS_RESULT_NOT_PASSED"]
     return {
-        "passed": ops.get("passed") is True,
-        "errors": list(ops.get("errors", [])),
+        "passed": passed,
+        "errors": errors,
         "offenders": dict(ops.get("offenders", {})),
         "ops_path": str(ops_path),
     }

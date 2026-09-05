@@ -1,6 +1,8 @@
 # Daily China / A-share AI channel
 
-Status: **SUSPENDED — environment-blocked (offline verified; Juhe discovery live verified; primary-evidence fetch blocked by local fake-IP DNS)**
+Historical status (2026-07-22): **SUSPENDED — environment-blocked** for the isolated
+manual A-share channel. This is not the status of the active Phase 3C scheduler.
+The local DNS blocker below is a dated observation, not a current network test.
 
 This additive channel is separate from the frozen DRAM/HBM research Harness. It cannot modify S0-S3, Adjudication, SEND_ALERT, or existing Signals, and it never sends email during validation.
 
@@ -36,7 +38,7 @@ Official PDFs are streamed with DNS validation and IP pinning, redirect revalida
 
 At most four A-share items may appear and they share the China limit of six and whole-digest limit of twelve. When nothing passes, the section says `今日无达到标准的A股AI重大公告`. Frozen-source and frozen-output replay make zero network, search, and DeepSeek calls.
 
-## Latest live audit
+## Historical live audit (2026-07-22)
 
 The latest A-share run queried four official discovery domains over a deterministic 48-hour window. One official candidate passed discovery, but safe fetch stopped at `NON_PUBLIC_ADDRESS` because the local DNS environment returned a reserved address. No raw text, DeepSeek analysis, or digest event was manufactured. A-share Ops passed the fail-closed result. TianAPI is now disabled.
 
@@ -46,7 +48,11 @@ On 2026-07-22 the Juhe live smoke passed: ID 235 headlines and ID 850 AI brief e
 
 The A-share channel is suspended as **environment-blocked**, not abandoned and not deleted. The code is complete and frozen at checkpoint `9898078` (`checkpoint: A-share AI channel (offline-verified, live pending)`). Offline verification passes and Juhe discovery is live-verified. Live acceptance cannot proceed because the local fake-IP DNS layer resolves every official T1 domain (SSE, SZSE, BSE, CNINFO) to reserved 198.18.x.x addresses, so the unchanged SSRF gate rejects every primary-evidence fetch with `NON_PUBLIC_ADDRESS`. This is an operator-environment blocker; the gate must not be relaxed to work around it. The channel resumes when the local DNS environment returns real public addresses for the official domains.
 
-Phase 3C (global AI news channel) starts early because of this external network blocker, not because of any defect in the A-share code. Global T1/T2 sources resolve to real public addresses through the operator's VPN, so the SSRF gate passes them and the full discovery → safe fetch → Gemini analysis → digest loop is achievable on this machine.
+At that checkpoint, Phase 3C was started early because of the local network blocker.
+Those local connectivity observations are historical, not a current guarantee.
+The active global scheduler now runs on GitHub-hosted runners. Its China desk is
+not this isolated official-index A-share pipeline: the scheduler does not pass
+the optional `--a-share` flag. See the [current runbook](PHASE_3C_RUNBOOK.md).
 
 ## Phase 3C automation boundary
 

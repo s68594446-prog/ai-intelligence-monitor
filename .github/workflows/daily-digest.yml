@@ -39,12 +39,12 @@ jobs:
       # script's content-keyed idempotency in email_digest.py — that is exactly
       # why 2026-07-27's two runs each sent a mail; this closes that.
       #
-      # KNOWN EDGE: the separate manual email-digest workflow has its own
-      # concurrency group. A manual send can therefore race this workflow. The
-      # content-keyed ledger is the final duplicate-send guard.
+      # Manual email-digest uses the same concurrency group so checkout and
+      # ledger reads cannot race a scheduled sender. The content-keyed ledger
+      # remains the final duplicate-send guard.
       #  * Digest file exists but has no SENT record (a prior send failed): the
-      #    guard sees no SENT and proceeds to regenerate/overwrite/re-send. This
-      #    is accepted for now — we would rather re-send than silently drop a day.
+      #    guard sees no SENT and may regenerate. Delivery still blocks if a
+      #    prior same-day PENDING/UNKNOWN attempt has not been reconciled.
       #
       # fail-soft: if the ledger cannot be read/parsed, we DO NOT skip — we
       # proceed (rather re-send than lose a real day) and mark a red ::warning::;
@@ -243,6 +243,18 @@ jobs:
           else
             python -m app.scripts.send_digest_email
           fi
+      - name: Preserve delivery attempt ledger on failure
+        if: failure() && steps.guard.outputs.send_email == 'true'
+        run: |
+          if [ -z "$(git status --porcelain -- digests/.email-log.jsonl)" ]; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add digests/.email-log.jsonl
+          git commit -m "email: preserve failed or uncertain delivery attempt"
+          git pull --rebase --autostash origin main
+          git push origin main
       - name: Commit delivered digest and email ledger
         if: steps.guard.outputs.skip != 'true' && steps.guard.outputs.send_email == 'true'
         run: |

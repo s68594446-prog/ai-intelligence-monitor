@@ -36,7 +36,9 @@ The CLI uses `backend/data/monitor.db`, `config/coverage/dram_hbm.yaml`, `config
 - `POST /api/demo/run`
 - `POST /api/runs/{run_id}/replay`
 
-Standards and scope are normative in [`docs/`](docs/).
+Start with the [documentation map](docs/README.md). Frozen standards remain
+normative; [architecture](ARCHITECTURE.md) describes Phase 3C boundaries, and the
+[Phase 3C runbook](docs/PHASE_3C_RUNBOOK.md) covers diagnosis and controlled delivery.
 
 ## Phase 1 configuration
 
@@ -166,8 +168,6 @@ Phase 3C reads `GEMINI_API_KEY`, `GEMINI_ANALYSIS_MODEL`, and `GEMINI_BASE_URL`.
 
 Transient Gemini 429/5xx responses receive bounded retries with short capped backoff while the configured per-run HTTP request budget remains authoritative. A per-minute 429 receives one bounded cooldown. An explicit per-model daily-quota response may switch once to the configured lower model; missing/disabled fallback, authentication failure, fallback exhaustion, or incomplete coverage still fails closed. Safely fetched sources are compared with the committed three-day `digests/.source-history.jsonl`; Gemini is skipped only when both canonical URL and content SHA-256 match, while changed content at the same URL remains eligible. The history contains no raw text.
 
-Digest publication and email are fail-closed:
-
 The scheduled run allows at most 50 successful fetch candidates and 65 total
 Gemini HTTP requests, including retries and the explicit model transition.
 `--max-provider-requests` sets that request ceiling (hard maximum 80); without
@@ -179,12 +179,22 @@ validated responses are audited in `provider-request-events.json`; unresolved
 candidate failures remain in `analysis-failures.json` and continue to block
 delivery when required by the department Gate.
 
+Digest publication and email are fail-closed:
+
 - A source-tier/model-label mismatch is rejected per item as `SOURCING_TIER_MISMATCH` and retained in `analysis-failures.json`; one rejected unpublished analysis cannot block otherwise valid items.
 - If fetched sources produced analysis attempts but Gemini returned zero schema-validated outputs, `analysis_provider_usable` fails Digest Ops; this cannot be reported as an honest empty-news day.
 - Digest Ops rechecks source-tier consistency and records named offenders as a backstop.
 - A missing or failed `ops.json` makes the GitHub job fail after artifact upload. No digest is committed and no email is attempted.
-- Only an Ops-passed digest is staged, email-gated, sent, and then committed together with its email ledger update.
+- The scheduled path stages an Ops-passed digest, email-gates and sends it, then commits it with the ledger. The manual email-only path consumes an already committed, audited digest.
 - Any email Gate block or SMTP failure makes the workflow fail instead of being reported as a green run.
+- Both gates require an actual Boolean Ops pass with no contradictory checks/errors; a string such as `"false"` cannot pass through Python truthiness.
+
+Both sending workflows share a concurrency lock. Manual `email-digest.yml`
+accepts `day=YYYY-MM-DD`, defaulting to today in Asia/Shanghai, and blocks if that
+date is missing instead of choosing an older digest. Same-day `PENDING`/`UNKNOWN`
+attempts block resending until reconciled. Failed-send handling attempts to preserve
+the ledger in Git while keeping the job failed. Runner loss or persistence failure
+still requires review; SMTP acceptance does not prove inbox delivery.
 
 The day-level ledger guard prevents ordinary scheduled duplicates, and the delivery service also uses a day/content/recipient idempotency key. Manual dispatch of `daily-digest.yml` defaults to a complete discovery/fetch/Gemini/render/Ops dry-run with `send_email=false`; it does not contact SMTP, append the send ledger, or commit generated files. Scheduled runs continue to send, and a manual send requires explicit `send_email=true`. The separate manual `email-digest.yml` workflow remains available for Gate dry-runs or controlled delivery attempts against an already committed digest. SMTP and provider credentials remain GitHub Secrets or local ignored environment values and are never written to digest artifacts. Successful send-ledger rows retain only a deterministic Message-ID, sender domain, acceptance timestamp, idempotency key, and recipient count for delivery troubleshooting; recipient addresses are not stored.
 

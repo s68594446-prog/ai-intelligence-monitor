@@ -1,9 +1,9 @@
 """Gemini structured-output adapter for the isolated Phase 3C digest.
 
 The API key is sent only in the ``x-goog-api-key`` request header.  The
-adapter does not enable tools or Search Grounding, does not fall back to a
-different model/provider, and still subjects output to the existing Pydantic
-and exact-evidence validation.
+adapter does not enable tools or Search Grounding. Only the explicitly enabled
+daily-quota model transition is allowed; providers are never changed. Output
+still passes the existing Pydantic and exact-evidence validation.
 """
 
 import json

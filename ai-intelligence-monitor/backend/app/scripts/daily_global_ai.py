@@ -161,6 +161,8 @@ def _take_domain_diverse(
 ) -> list:
     """Bound one publisher without changing source-tier or evidence rules."""
 
+    if limit <= 0 or cap <= 0:
+        return []
     selected = []
     counts: dict[str, int] = {}
     for item in existing or []:

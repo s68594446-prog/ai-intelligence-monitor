@@ -120,3 +120,10 @@ def test_source_cap_groups_subdomains_of_the_same_publisher():
     selected = _take_domain_diverse(candidates, 3, cap=2)
 
     assert [item.name for item in selected] == ["news", "blog", "other"]
+
+
+def test_zero_fetch_share_never_selects_an_extra_candidate():
+    candidates = [SimpleNamespace(source_domain="example.com")]
+    assert _take_domain_diverse(candidates, 0) == []
+    assert _take_domain_diverse(candidates, -1) == []
+    assert _take_domain_diverse(candidates, 1, cap=0) == []

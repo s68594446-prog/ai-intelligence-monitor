@@ -15,11 +15,12 @@ import html
 import json
 import re
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 
 from app.core.settings import Settings
+from app.daily_ai.ops_report import report_passed
 from app.delivery.contracts import EmailDeliveryRequest
 from app.delivery.email_adapter import (
     SMTPEmailDeliveryAdapter,
@@ -71,11 +72,12 @@ def latest_digest_path(digests_dir: Path) -> Path | None:
 
 
 def _ops_passed(markdown: str) -> bool | None:
-    match = re.search(r"### ops\.json\s*```json\s*(\{.*?\})\s*```", markdown, re.S)
-    if not match:
+    appendix = markdown.partition(AUDIT_MARKER)[2]
+    matches = re.findall(r"### ops\.json\s*```json\s*(.*?)\s*```", appendix, re.S)
+    if len(matches) != 1:
         return None
     try:
-        return bool(json.loads(match.group(1)).get("passed"))
+        return report_passed(json.loads(matches[0]))
     except ValueError:
         return None
 
@@ -84,10 +86,22 @@ def evaluate_digest(path: Path) -> DigestGateResult:
     reasons: list[str] = []
     if not path.is_file() or path.is_symlink():
         return DigestGateResult(False, ["DIGEST_NOT_A_REGULAR_FILE"], path.stem, "", False)
-    raw = path.read_bytes()
+    try:
+        if date.fromisoformat(path.stem).isoformat() != path.stem:
+            raise ValueError
+    except ValueError:
+        return DigestGateResult(False, ["DIGEST_DATE_INVALID"], path.stem, "", False)
+    try:
+        with path.open("rb") as handle:
+            raw = handle.read(MAX_DIGEST_BYTES + 1)
+    except OSError:
+        return DigestGateResult(False, ["DIGEST_READ_FAILED"], path.stem, "", False)
     if len(raw) > MAX_DIGEST_BYTES:
-        reasons.append("DIGEST_TOO_LARGE")
-    markdown = raw.decode("utf-8", "strict")
+        return DigestGateResult(False, ["DIGEST_TOO_LARGE"], path.stem, "", False)
+    try:
+        markdown = raw.decode("utf-8", "strict")
+    except UnicodeDecodeError:
+        return DigestGateResult(False, ["DIGEST_ENCODING_INVALID"], path.stem, "", False)
     body = split_digest_body(markdown)
     ops = _ops_passed(markdown)
     if ops is None:
@@ -428,6 +442,13 @@ class EmailLedger:
     def already_sent(self, key: str) -> bool:
         return any(entry.get("idempotency_key") == key and entry.get("status") == "SENT" for entry in self._entries())
 
+    def unresolved_attempt(self, key: str, day: str) -> bool:
+        latest = {}
+        for entry in self._entries():
+            if entry.get("idempotency_key") == key or entry.get("day") == day:
+                latest[entry.get("idempotency_key")] = entry.get("status")
+        return any(status in {"PENDING", "UNKNOWN"} for status in latest.values())
+
     def append(self, entry: dict) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.path.open("a", encoding="utf-8") as handle:
@@ -459,9 +480,16 @@ def deliver_latest(
     digests_dir: Path,
     ledger_path: Path,
     send: bool,
+    day: str | None = None,
 ) -> dict:
-    """Gate + (optional) send for the most recent prepared digest file."""
-    path = latest_digest_path(digests_dir)
+    """Gate + optional send for an exact day, or latest for legacy CLI callers."""
+    if day is not None:
+        try:
+            if date.fromisoformat(day).isoformat() != day:
+                raise ValueError
+        except ValueError:
+            return {"status": "BLOCKED", "reasons": ["DIGEST_DATE_INVALID"]}
+    path = digests_dir / f"{day}.md" if day else latest_digest_path(digests_dir)
     if path is None:
         return {"status": "BLOCKED", "reasons": ["NO_DIGEST_FOUND"]}
     gate = evaluate_digest(path)
@@ -476,6 +504,8 @@ def deliver_latest(
     ledger = EmailLedger(ledger_path)
     if ledger.already_sent(key):
         return {"status": "ALREADY_SENT", "day": gate.day, "idempotency_key": key, "recipient_count": len(request.to_addresses)}
+    if ledger.unresolved_attempt(key, gate.day):
+        return {"status": "BLOCKED", "day": gate.day, "reasons": ["PRIOR_DELIVERY_OUTCOME_UNRESOLVED"]}
     if not send:
         return {"status": "READY", "day": gate.day, "idempotency_key": key, "recipient_count": len(request.to_addresses), "dry_run": True}
 
