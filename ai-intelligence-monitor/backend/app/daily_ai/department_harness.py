@@ -120,12 +120,12 @@ class DepartmentInput(ImmutableModel):
     base_prompt_version: str = BASE_PROMPT_VERSION
     department_prompt_version: str
     model_name: str
-    request_budget: int = Field(ge=0, le=40)
+    request_budget: int = Field(ge=0, le=80)
     candidates: tuple[DepartmentCandidate, ...] = ()
 
 
 class ProviderUsage(ImmutableModel):
-    request_budget: int = Field(ge=0, le=40)
+    request_budget: int = Field(ge=0, le=80)
     request_count: int = Field(ge=0)
     candidate_attempts: int = Field(ge=0)
     validated_outputs: int = Field(ge=0)

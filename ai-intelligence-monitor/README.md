@@ -168,6 +168,17 @@ Transient Gemini 429/5xx responses receive bounded retries with short capped bac
 
 Digest publication and email are fail-closed:
 
+The scheduled run allows at most 50 successful fetch candidates and 65 total
+Gemini HTTP requests, including retries and the explicit model transition.
+`--max-provider-requests` sets that request ceiling (hard maximum 80); without
+it, the legacy `--max-analyze` request ceiling is preserved. All fetched,
+non-duplicate candidates remain in the coverage denominator. No candidate is
+dropped merely to make Ops pass. Timeout recovery uses the existing bounded
+retry count and shared 2400-second deadline. Recovered HTTP failures and
+validated responses are audited in `provider-request-events.json`; unresolved
+candidate failures remain in `analysis-failures.json` and continue to block
+delivery when required by the department Gate.
+
 - A source-tier/model-label mismatch is rejected per item as `SOURCING_TIER_MISMATCH` and retained in `analysis-failures.json`; one rejected unpublished analysis cannot block otherwise valid items.
 - If fetched sources produced analysis attempts but Gemini returned zero schema-validated outputs, `analysis_provider_usable` fails Digest Ops; this cannot be reported as an honest empty-news day.
 - Digest Ops rechecks source-tier consistency and records named offenders as a backstop.

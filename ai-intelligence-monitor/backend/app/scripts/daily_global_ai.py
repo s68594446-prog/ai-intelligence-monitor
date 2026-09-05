@@ -194,8 +194,14 @@ def _args():
     parser.add_argument("--max-results", type=int, default=3)
     parser.add_argument("--max-fetch", type=int, default=3)
     parser.add_argument("--max-analyze", type=int, default=2)
+    parser.add_argument(
+        "--max-provider-requests", type=int, default=None,
+        help="explicit total Gemini HTTP ceiling including retries; defaults to legacy --max-analyze",
+    )
     parser.add_argument("--lookback-hours", type=int, default=48, help="only items published within this window (unknown dates kept)")
     args = parser.parse_args()
+    if args.max_provider_requests is None:
+        args.max_provider_requests = args.max_analyze
     if args.send:
         print("status=BLOCKED")
         print("error_code=EMAIL_NOT_CONFIGURED")
@@ -210,6 +216,8 @@ def _args():
         raise SystemExit("--a-share requires --fetch")
     if not 1 <= args.max_queries <= 13 or not 1 <= args.max_results <= 5 or not 1 <= args.max_fetch <= 60 or not 1 <= args.max_analyze <= 40 or not 1 <= args.lookback_hours <= 96:
         raise SystemExit("budgets out of bounds")
+    if not 1 <= args.max_provider_requests <= 80:
+        raise SystemExit("provider request budget out of bounds (1-80)")
     return args
 
 
@@ -294,7 +302,7 @@ def run():
     ]
     _write(run_dir / "00-search-plan.json", {
         "run_id": run_id, "plan_version": plan.plan_version, "policy_version": policy.policy_version,
-        "query_count": len(queries), "budgets": {"max_queries": args.max_queries, "max_results": args.max_results, "max_fetch": args.max_fetch, "max_analyze": args.max_analyze},
+        "query_count": len(queries), "budgets": {"max_queries": args.max_queries, "max_results": args.max_results, "max_fetch": args.max_fetch, "max_analyze": args.max_analyze, "max_provider_requests": args.max_provider_requests},
         "queries": [q.model_dump(mode="json") for q in queries],
         "stages": {"discover": args.discover, "rss": args.rss, "juhe": args.juhe, "fetch": args.fetch, "analyze": args.analyze, "render": args.render, "a_share": args.a_share},
         "source_history": {
@@ -562,7 +570,7 @@ def run():
             if args.analyze:
                 analysis_candidate_count = len(analysis_jobs)
                 department_budgets = allocate_department_request_budgets(
-                    args.max_analyze,
+                    args.max_provider_requests,
                     candidate_counts={
                         department: len(department_candidates[department])
                         for department in CONTENT_DEPARTMENTS
@@ -705,7 +713,7 @@ def run():
                 for item in analyzers.values()
                 if item is not None
             )
-            provider_budget_exhausted = provider_request_attempts >= args.max_analyze
+            provider_budget_exhausted = provider_request_attempts >= args.max_provider_requests
             for item in analyzers.values():
                 if item is not None:
                     item.close()
@@ -718,6 +726,14 @@ def run():
     _write(run_dir / "02-fetch.json", {"run_id": run_id, "fetched": [{k: v for k, v in item.items() if k != "raw_text"} for item in sources], "blocked": blocked, "cross_day_duplicates": cross_day_duplicates})
     _write(run_dir / "03-analysis-output.json", [item.model_dump(mode="json") for item in analyses])
     _write(run_dir / "analysis-failures.json", analysis_failures)
+    # Recovered request failures remain auditable without misclassifying a
+    # successfully completed candidate as an unresolved provider failure.
+    _write(run_dir / "provider-request-events.json", [
+        {"department": department.value, **event}
+        for department, analyzer in analyzers.items()
+        if analyzer is not None
+        for event in analyzer.request_events
+    ])
 
     raw_by_url = {item["url"]: item["raw_text"] for item in sources}
     evidence_decisions = evidence_review(
@@ -1010,6 +1026,8 @@ def run():
             },
             "audit": {
                 **ops.audit,
+                "provider_request_budget": args.max_provider_requests,
+                "provider_request_attempts": provider_request_attempts,
                 "analysis_model": analysis_model_label,
                 "primary_model": settings.gemini_analysis_model,
                 "configured_fallback_model": settings.gemini_fallback_model,
@@ -1091,6 +1109,7 @@ def run():
         "fetched": len(sources), "blocked": len(blocked),
         "analyze_attempts": analyze_attempts, "analyzed": len(analyses),
         "provider_request_attempts": provider_request_attempts,
+        "provider_request_budget": args.max_provider_requests,
         "provider_halted": provider_halted,
         "analysis_candidate_count": analysis_candidate_count,
         "unprocessed_candidate_count": max(0, analysis_candidate_count - analyze_attempts),

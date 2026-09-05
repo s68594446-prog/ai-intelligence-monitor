@@ -336,6 +336,7 @@ class GeminiGlobalAiAnalysisAdapter:
         self.max_retries = max_retries
         self.max_provider_requests = max_provider_requests
         self.request_count = 0
+        self.request_events: list[dict] = []
         self.models_used: list[str] = []
         self._sleep = sleep_fn
         self._random = random_fn
@@ -434,6 +435,20 @@ class GeminiGlobalAiAnalysisAdapter:
                     json=payload,
                 )
             except (httpx.TimeoutException, TimeoutError) as exc:
+                will_retry = retry_number < self.max_retries and (
+                    self.max_provider_requests is None
+                    or self.request_count < self.max_provider_requests
+                )
+                self.request_events.append({
+                    "source_url": source_url,
+                    "model": request_model,
+                    "request_number": self.request_count,
+                    "reason_code": "GEMINI_TIMEOUT",
+                    "retry_scheduled": will_retry,
+                })
+                if will_retry:
+                    self.governor.sleep(min(2**retry_number, MAX_RETRY_DELAY_SECONDS))
+                    continue
                 raise ProviderCallError(
                     "Gemini analysis timed out",
                     diagnostics={
@@ -452,6 +467,14 @@ class GeminiGlobalAiAnalysisAdapter:
                 ) from exc
 
             diagnostics = _safe_provider_diagnostics(response)
+            if response.status_code != 200:
+                self.request_events.append({
+                    "source_url": source_url,
+                    "model": request_model,
+                    "request_number": self.request_count,
+                    "status_code": response.status_code,
+                    **diagnostics,
+                })
             quota_ids = diagnostics.get("quota_ids", [])
             daily_quota = any(DAILY_QUOTA.search(value) for value in quota_ids)
             minute_quota = any(PER_MINUTE_QUOTA.search(value) for value in quota_ids)
@@ -643,4 +666,10 @@ class GeminiGlobalAiAnalysisAdapter:
                     for entry in failed
                 ],
             )
+        self.request_events.append({
+            "source_url": source_url,
+            "model": request_model,
+            "request_number": self.request_count,
+            "reason_code": "VALIDATED_OUTPUT",
+        })
         return contract

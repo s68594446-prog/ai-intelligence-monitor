@@ -86,6 +86,34 @@ def assert_no_key(value) -> None:
     assert API_KEY not in json.dumps(value, ensure_ascii=False, default=str)
 
 
+@pytest.mark.parametrize("request_cap,expected_calls", [(1, 1), (10, 3)])
+def test_timeout_retries_respect_http_budget_and_retry_ceiling(request_cap, expected_calls):
+    def handler(request):
+        raise httpx.ReadTimeout(API_KEY, request=request)
+
+    analyzer = adapter(handler, max_retries=2, max_provider_requests=request_cap)
+    with pytest.raises(ProviderCallError) as caught:
+        analyzer.analyze(metadata={}, raw_text=RAW_TEXT, source_url=SOURCE_URL)
+    assert caught.value.diagnostics["reason_code"] == "GEMINI_TIMEOUT"
+    assert analyzer.request_count == expected_calls
+    assert_no_key(analyzer.request_events)
+
+
+def test_timeout_recovery_cannot_exceed_shared_deadline():
+    governor = GeminiRequestGovernor(
+        minimum_interval_seconds=0, max_run_seconds=0.5,
+        sleep_fn=lambda _: None, monotonic_fn=lambda: 0,
+    )
+    def handler(request):
+        raise httpx.ReadTimeout(API_KEY, request=request)
+
+    analyzer = adapter(handler, max_retries=2, governor=governor)
+    with pytest.raises(ProviderCallError) as caught:
+        analyzer.analyze(metadata={}, raw_text=RAW_TEXT, source_url=SOURCE_URL)
+    assert caught.value.diagnostics["reason_code"] == "GEMINI_RUN_DEADLINE_EXCEEDED"
+    assert analyzer.request_count == 1
+
+
 def test_gemini_uses_header_system_instruction_and_structured_schema_only():
     seen = {}
 

@@ -155,9 +155,10 @@ jobs:
           JUHE_HEADLINES_API_KEY: ${{ secrets.JUHE_HEADLINES_API_KEY }}
           JUHE_AI_BRIEF_ENABLED: "true"
           JUHE_AI_BRIEF_API_KEY: ${{ secrets.JUHE_AI_BRIEF_API_KEY }}
-        # Scaled budgets: up to 50 page fetches and 35 Gemini calls per run
-        # across both boards, 48h freshness window.
-        run: python -m app.scripts.daily_global_ai --rss --juhe --fetch --analyze --render --max-fetch 50 --max-analyze 35 --lookback-hours 48
+        # Cover every successfully fetched candidate (at most 50), plus 15
+        # bounded requests for recovery / quota fallback. Do not truncate the
+        # candidate pool to make coverage pass. The 2400s deadline still applies.
+        run: python -m app.scripts.daily_global_ai --rss --juhe --fetch --analyze --render --max-fetch 50 --max-provider-requests 65 --lookback-hours 48
       - name: Upload full run artifacts (audit trail)
         if: always() && steps.guard.outputs.skip != 'true'
         uses: actions/upload-artifact@v6

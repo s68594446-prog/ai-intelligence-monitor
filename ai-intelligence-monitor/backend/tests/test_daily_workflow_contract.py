@@ -64,6 +64,15 @@ def test_daily_workflow_uses_gemini_without_deepseek_fallback():
     assert analysis["run"].strip().startswith("python -m app.scripts.daily_global_ai")
 
 
+def test_daily_workflow_can_cover_all_fetches_and_has_bounded_retry_reserve():
+    steps = load_steps("daily-digest.yml")
+    analysis = next(step for step in steps if step.get("name", "").startswith("Run daily digest"))
+    command = analysis["run"].split()
+    fetch_cap = int(command[command.index("--max-fetch") + 1])
+    request_cap = int(command[command.index("--max-provider-requests") + 1])
+    assert 0 < fetch_cap < request_cap <= 80
+
+
 def test_env_probe_only_receives_gemini_configuration():
     workflow = yaml.safe_load((WORKFLOWS_DIR / "env-probe.yml").read_text(encoding="utf-8"))
     step = next(
