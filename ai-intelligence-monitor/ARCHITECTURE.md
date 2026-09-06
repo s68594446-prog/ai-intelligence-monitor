@@ -126,6 +126,12 @@ all fail language checks is blocked, not a healthy empty digest. Unexpected
 execution errors and any unprocessed candidates also block delivery. Optional
 empty risk/path fields and original-language quotes remain legal.
 
+Provider transport/structure health is measured per content desk: at least 80%
+of attempted candidates must produce schema-validated responses. This permits
+isolated, audited terminal network/5xx failures without turning one article into
+a whole-digest outage, while low response coverage still fails closed. Content
+rejections remain governed independently by Evidence, language and discipline gates.
+
 The shared Phase 3C `ops_report.py` predicate requires Boolean `passed=true`,
 Boolean `true` for every supplied check, and an empty supplied error list at both
 publication and mail boundaries. Email reads exactly one `ops.json` block inside

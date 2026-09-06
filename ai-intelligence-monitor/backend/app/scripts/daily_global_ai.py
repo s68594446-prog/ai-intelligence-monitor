@@ -88,6 +88,7 @@ MACRO_PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts/daily_us_macr
 PROJECT_DIR = Path(__file__).resolve().parents[3]
 SOURCE_HISTORY_PATH = PROJECT_DIR.parent / "digests/.source-history.jsonl"
 FETCH_MAX_BYTES = 5_000_000
+MIN_PROVIDER_RESPONSE_COVERAGE = 0.80
 # A T1 page we cannot fetch (403 / access challenge) may still be reachable
 # through a T2 retelling of the SAME event cluster. That substitute is fetched
 # normally and analysed as SECONDHAND_REPORT with its original source named —
@@ -195,6 +196,15 @@ def source_acquisition_checks(*, discovery_status: dict[str, str], fetch_request
         "source_discovery_usable": any(status == "SUCCESS" for status in discovery_status.values()),
         "source_fetch_usable": not fetch_requested or planned_fetch_count == 0 or fetched_count > 0,
     }
+
+
+def provider_response_coverage_sufficient(*, attempts: int, validated: int) -> bool:
+    """Allow isolated terminal transport failures, block broadly unusable output.
+
+    Evidence/language rejections happen after schema validation and have their
+    own gates. This ratio measures provider transport/structure usability only.
+    """
+    return attempts == 0 or validated / attempts >= MIN_PROVIDER_RESPONSE_COVERAGE
 
 
 def _args():
@@ -783,6 +793,10 @@ def run():
             for analysis in analyses
             if department_by_url.get(str(analysis.evidence[0].source_url)) == department
         ]
+        response_coverage_ok = provider_response_coverage_sufficient(
+            attempts=department_attempts[department],
+            validated=department_validated[department],
+        )
         affects_completion = department_halted[department] or (
             provider_halted
             and department_attempts[department] < len(department_candidates[department])
@@ -792,7 +806,11 @@ def run():
             candidate_attempts=department_attempts[department],
             accepted_count=len(accepted),
             provider_halted=affects_completion,
-            failure_codes=department_failures[department],
+            # A small number of terminal per-item transport failures is
+            # fail-soft once the desk processed its pool with sufficient
+            # validated response coverage. The complete audit is still kept.
+            failure_codes=(department_failures[department]
+                           if not response_coverage_ok else []),
         )
         content_statuses[department] = status
         active = analyzers[department]
@@ -992,6 +1010,16 @@ def run():
         discovery_status=discovery_status, fetch_requested=args.fetch,
         planned_fetch_count=len(fetch_plan), fetched_count=len(sources),
     ))
+    additional_checks.update(
+        {
+            f"{department.value}_provider_response_coverage_sufficient":
+            provider_response_coverage_sufficient(
+                attempts=department_attempts[department],
+                validated=department_validated[department],
+            )
+            for department in CONTENT_DEPARTMENTS
+        }
+    )
     additional_checks.update(
         {
             f"{department.value}_analysis_execution_complete": not any(

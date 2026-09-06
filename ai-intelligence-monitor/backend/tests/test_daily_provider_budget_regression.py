@@ -16,7 +16,7 @@ from test_gemini_global_analysis import valid_output, response_for
 
 @pytest.mark.parametrize(
     "request_cap,persistent_timeout,defect,expected_pass",
-    [(65, False, None, True), (35, False, None, False), (65, True, None, False),
+    [(65, False, None, True), (35, False, None, False), (65, True, None, True),
      (65, False, "one_english", True), (65, False, "all_english", False),
      (65, False, "china_english", False), (65, False, "risk_repetition", True),
      (65, False, "unexpected", False), (65, False, "fetch_all_blocked", False)],
@@ -150,14 +150,14 @@ def test_full_daily_run_preserves_36_candidates_and_fails_closed(
     assert any(event.get("reason_code") == "GEMINI_TIMEOUT" for event in events)
     if expected_pass:
         assert summary["analyze_attempts"] == 36
-        assert summary["provider_validated_outputs"] == 36
-        assert summary["provider_request_attempts"] == 38
+        assert summary["provider_validated_outputs"] == (35 if persistent_timeout else 36)
+        assert summary["provider_request_attempts"] == (39 if persistent_timeout else 38)
         assert summary["unprocessed_candidate_count"] == 0
-        if defect:
+        if defect or persistent_timeout:
             assert len(failures) == 1
-            assert failures[0]["error_code"] == (
-                "OUTPUT_LANGUAGE_INVALID" if defect == "one_english" else "LOW_TEXT_QUALITY"
-            )
+            expected_code = "GEMINI_TIMEOUT" if persistent_timeout else (
+                "OUTPUT_LANGUAGE_INVALID" if defect == "one_english" else "LOW_TEXT_QUALITY")
+            assert failures[0]["error_code"] == expected_code
             assert summary["analyzed"] == 35
         else:
             assert not failures
@@ -170,9 +170,6 @@ def test_full_daily_run_preserves_36_candidates_and_fails_closed(
         assert summary["unprocessed_candidate_count"] == 0
         assert "global_analysis_execution_complete" in ops["errors"]
         assert failures[0]["error_code"] == "UNEXPECTED_RuntimeError"
-    elif persistent_timeout:
-        assert "global_department_complete" in ops["errors"]
-        assert any(failure["error_code"] == "GEMINI_TIMEOUT" for failure in failures)
     else:
         assert summary["unprocessed_candidate_count"] > 0
         assert "analysis_coverage_complete" in ops["errors"]

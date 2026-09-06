@@ -7,7 +7,10 @@ from app.daily_ai.global_digest import select_global_digest, render_global_diges
 from app.daily_ai.global_ops import (
     check_global_channel, output_language_violations, output_quality_violations,
 )
-from app.scripts.daily_global_ai import SOURCE_POLICY_PATH, source_acquisition_checks
+from app.scripts.daily_global_ai import (
+    SOURCE_POLICY_PATH, provider_response_coverage_sufficient,
+    source_acquisition_checks,
+)
 from app.web_discovery.source_policy import load_source_policy
 from test_gemini_global_analysis import valid_output, SOURCE_URL, RAW_TEXT
 
@@ -97,3 +100,13 @@ def test_acquisition_distinguishes_unavailable_from_healthy_empty(statuses, plan
     checks = source_acquisition_checks(discovery_status=statuses, fetch_requested=True,
                                        planned_fetch_count=planned, fetched_count=fetched)
     assert all(checks.values()) is expected
+
+
+@pytest.mark.parametrize("attempts,validated,expected", [
+    (0, 0, True), (7, 6, True), (21, 19, True),
+    (5, 4, True), (5, 3, False), (20, 1, False), (1, 0, False),
+])
+def test_provider_response_coverage_is_explicit_and_bounded(attempts, validated, expected):
+    assert provider_response_coverage_sufficient(
+        attempts=attempts, validated=validated,
+    ) is expected
