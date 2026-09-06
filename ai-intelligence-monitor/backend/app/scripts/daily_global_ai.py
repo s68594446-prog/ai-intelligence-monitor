@@ -786,6 +786,7 @@ def run():
         DepartmentId.MACRO: "daily-us-macro-analysis-v1",
     }
     content_statuses: dict[DepartmentId, DepartmentStatus] = {}
+    department_accepted: dict[DepartmentId, int] = {}
     department_handoffs = []
     for department in CONTENT_DEPARTMENTS:
         accepted = [
@@ -793,6 +794,7 @@ def run():
             for analysis in analyses
             if department_by_url.get(str(analysis.evidence[0].source_url)) == department
         ]
+        department_accepted[department] = len(accepted)
         response_coverage_ok = provider_response_coverage_sufficient(
             attempts=department_attempts[department],
             validated=department_validated[department],
@@ -1036,6 +1038,15 @@ def run():
                 department_validated[department] == 0
                 or department_failures[department].count("OUTPUT_LANGUAGE_INVALID")
                 < department_validated[department]
+            )
+            for department in CONTENT_DEPARTMENTS
+        }
+    )
+    additional_checks.update(
+        {
+            f"{department.value}_analysis_semantic_output_usable": (
+                department_attempts[department] == 0
+                or department_accepted[department] > 0
             )
             for department in CONTENT_DEPARTMENTS
         }

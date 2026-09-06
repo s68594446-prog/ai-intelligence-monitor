@@ -19,7 +19,8 @@ from test_gemini_global_analysis import valid_output, response_for
     [(65, False, None, True), (35, False, None, False), (65, True, None, True),
      (65, False, "one_english", True), (65, False, "all_english", False),
      (65, False, "china_english", False), (65, False, "risk_repetition", True),
-     (65, False, "unexpected", False), (65, False, "fetch_all_blocked", False)],
+     (65, False, "unexpected", False), (65, False, "fetch_all_blocked", False),
+     (65, False, "all_quality_invalid", False)],
 )
 def test_full_daily_run_preserves_36_candidates_and_fails_closed(
     monkeypatch, tmp_path, capsys, request_cap, persistent_timeout, defect, expected_pass,
@@ -102,6 +103,8 @@ def test_full_daily_run_preserves_36_candidates_and_fails_closed(
                           why_it_matters="Equipment qualification enables supply.")
         if defect == "risk_repetition" and url == timeout_url:
             output["risks_and_counterevidence"] = ["设备设备设备设备设备"]
+        if defect == "all_quality_invalid":
+            output["uncertainties"] = ["设备设备设备设备设备"]
         return httpx.Response(200, json=response_for(output))
 
     class Adapter(GeminiGlobalAiAnalysisAdapter):
@@ -166,6 +169,11 @@ def test_full_daily_run_preserves_36_candidates_and_fails_closed(
         assert summary["unprocessed_candidate_count"] == 0
         assert "china_analysis_language_usable" in ops["errors"]
         assert len(failures) == (36 if defect == "all_english" else 6)
+    elif defect == "all_quality_invalid":
+        assert summary["unprocessed_candidate_count"] == 0
+        assert "global_analysis_semantic_output_usable" in ops["errors"]
+        assert "china_analysis_semantic_output_usable" in ops["errors"]
+        assert len(failures) == 36
     elif defect == "unexpected":
         assert summary["unprocessed_candidate_count"] == 0
         assert "global_analysis_execution_complete" in ops["errors"]

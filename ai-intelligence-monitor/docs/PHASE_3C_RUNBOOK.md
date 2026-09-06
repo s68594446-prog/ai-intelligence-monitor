@@ -46,6 +46,7 @@ git diff --check
 | source_discovery_usable / source_fetch_usable 失败 | 全部发现源不可用或全部候选抓取失败；不生成假“无新闻”日报，也不绕过访问限制 |
 | 少数 GEMINI_NETWORK_ERROR / SERVER_ERROR | 单条记录并隔离；部门结构化响应覆盖率达到 80%、全部候选已处理且未 halted 时可继续 |
 | provider_response_coverage_sufficient 失败 | 部门结构化响应不足 80%，即使有个别成功也阻止发布 |
+| analysis_semantic_output_usable 失败 | 部门有分析候选但所有输出均被 Evidence、合规、语言或质量检查拒绝；不能当健康空日报 |
 | SMTP 明确失败 | 修正对应配置/服务问题，核对台账再决定是否重试 |
 | PENDING/UNKNOWN | 先核查 SMTP、台账、退信和收件端；不盲目再次发送 |
 
@@ -100,6 +101,8 @@ gh workflow run email-digest.yml --repo s68594446-prog/ai-intelligence-monitor -
 80%。这是传输与结构化输出可用性 Gate，不取代 Evidence、中文、数字引用、
 来源等级或重要性检查。少数候选在有限重试后仍遇到网络/5xx 时可隔离；
 低于 80%、任何未处理候选、provider halted 或执行异常仍会失败关闭。
+每个有分析候选的部门还必须至少保留一条通过现有语义检查的输出；这不要求
+该条达到 60 分，因此不会强行增加新闻数量。
 
 发送失败时 workflow 尝试仅保存台账，不发布失败日报。相同日期的未解决
 PENDING/UNKNOWN 会阻止重发，即使重新生成的正文不同。明确 FAILED 可在
