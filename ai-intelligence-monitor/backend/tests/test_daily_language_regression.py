@@ -7,7 +7,7 @@ from app.daily_ai.global_digest import select_global_digest, render_global_diges
 from app.daily_ai.global_ops import (
     check_global_channel, output_language_violations, output_quality_violations,
 )
-from app.scripts.daily_global_ai import SOURCE_POLICY_PATH
+from app.scripts.daily_global_ai import SOURCE_POLICY_PATH, source_acquisition_checks
 from app.web_discovery.source_policy import load_source_policy
 from test_gemini_global_analysis import valid_output, SOURCE_URL, RAW_TEXT
 
@@ -83,3 +83,17 @@ def test_all_language_rejected_is_not_a_healthy_empty_day():
                      analysis_attempts=2, provider_validated_outputs=2,
                      provider_failure_codes=["OUTPUT_LANGUAGE_INVALID"] * 2)
     assert not report.checks["analysis_language_usable"]
+
+
+@pytest.mark.parametrize("statuses,planned,fetched,expected", [
+    ({"feed": "UPSTREAM_ERROR:HTTP_503"}, 0, 0, False),
+    ({"feed": "DISABLED"}, 0, 0, False),
+    ({}, 0, 0, False),
+    ({"feed": "SUCCESS"}, 5, 0, False),
+    ({"feed": "SUCCESS"}, 0, 0, True),
+    ({"one": "SUCCESS", "two": "UPSTREAM_ERROR:HTTP_403"}, 5, 2, True),
+])
+def test_acquisition_distinguishes_unavailable_from_healthy_empty(statuses, planned, fetched, expected):
+    checks = source_acquisition_checks(discovery_status=statuses, fetch_requested=True,
+                                       planned_fetch_count=planned, fetched_count=fetched)
+    assert all(checks.values()) is expected

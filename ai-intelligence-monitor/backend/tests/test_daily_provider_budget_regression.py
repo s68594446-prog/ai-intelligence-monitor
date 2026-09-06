@@ -19,7 +19,7 @@ from test_gemini_global_analysis import valid_output, response_for
     [(65, False, None, True), (35, False, None, False), (65, True, None, False),
      (65, False, "one_english", True), (65, False, "all_english", False),
      (65, False, "china_english", False), (65, False, "risk_repetition", True),
-     (65, False, "unexpected", False)],
+     (65, False, "unexpected", False), (65, False, "fetch_all_blocked", False)],
 )
 def test_full_daily_run_preserves_36_candidates_and_fails_closed(
     monkeypatch, tmp_path, capsys, request_cap, persistent_timeout, defect, expected_pass,
@@ -59,6 +59,8 @@ def test_full_daily_run_preserves_36_candidates_and_fails_closed(
             pass
 
         def fetch(self, candidate, **kwargs):
+            if defect == "fetch_all_blocked":
+                return SimpleNamespace(status=SimpleNamespace(value="BLOCKED"), error_code="NON_PUBLIC_ADDRESS")
             return SimpleNamespace(
                 status=SimpleNamespace(value="SUCCESS"), title=candidate.title,
                 response_sha256="a" * 64, content_hash="b" * 64, raw_text=raw_text,
@@ -132,6 +134,13 @@ def test_full_daily_run_preserves_36_candidates_and_fails_closed(
     ops = json.loads((run_dir / "ops.json").read_text())
     events = json.loads((run_dir / "provider-request-events.json").read_text())
     failures = json.loads((run_dir / "analysis-failures.json").read_text())
+    if defect == "fetch_all_blocked":
+        assert summary["fetched"] == 0
+        assert summary["provider_request_attempts"] == 0
+        assert summary["digest_items"] == 0
+        assert not ops["passed"]
+        assert "source_fetch_usable" in ops["errors"]
+        return
     assert summary["analysis_candidate_count"] == 36
     assert summary["fetched"] == 36
     assert summary["fallback_used"] is True

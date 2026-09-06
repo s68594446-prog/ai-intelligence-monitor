@@ -43,6 +43,7 @@ git diff --check
 | OUTPUT_LANGUAGE_INVALID | 单条中文字段不合格，在入选前隔离并审计字段名；不翻译 Evidence，不盲目重试模型 |
 | 全部门输出语言不合格 | `*_analysis_language_usable` 阻止发布，不能当作健康空日报 |
 | UNEXPECTED_* | 脱敏记录异常类型，执行完成检查阻止发布；不能把程序异常视为正常筛选 |
+| source_discovery_usable / source_fetch_usable 失败 | 全部发现源不可用或全部候选抓取失败；不生成假“无新闻”日报，也不绕过访问限制 |
 | SMTP 明确失败 | 修正对应配置/服务问题，核对台账再决定是否重试 |
 | PENDING/UNKNOWN | 先核查 SMTP、台账、退信和收件端；不盲目再次发送 |
 
@@ -90,6 +91,8 @@ gh workflow run email-digest.yml --repo s68594446-prog/ai-intelligence-monitor -
 单条输出失败可隔离，但全部结构化输出都因语言不合格被拒绝时必须阻止
 发布；个别部门全失败也不能被其他部门的成功掩盖。未处理候选一律阻断，
 不再依赖 `provider_halted` 是否被正确设置。Evidence 与 60 分门槛保持不变。
+全部发现源失败或全部计划候选抓取失败也会阻止发布；部分可选来源失败仍
+按既有策略记录，正常发现后确实没有合格候选的空日报仍然允许。
 
 发送失败时 workflow 尝试仅保存台账，不发布失败日报。相同日期的未解决
 PENDING/UNKNOWN 会阻止重发，即使重新生成的正文不同。明确 FAILED 可在

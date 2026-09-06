@@ -184,6 +184,19 @@ def _write(path: Path, value):
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
 
 
+def source_acquisition_checks(*, discovery_status: dict[str, str], fetch_requested: bool,
+                              planned_fetch_count: int, fetched_count: int) -> dict[str, bool]:
+    """An unavailable discovery/fetch stage is not a healthy empty news day.
+
+    One optional feed failing still does not block other usable sources. A
+    successful discovery with no eligible candidates remains a legal empty day.
+    """
+    return {
+        "source_discovery_usable": any(status == "SUCCESS" for status in discovery_status.values()),
+        "source_fetch_usable": not fetch_requested or planned_fetch_count == 0 or fetched_count > 0,
+    }
+
+
 def _args():
     parser = argparse.ArgumentParser(description="Daily AI digest channel (domestic network); default is offline dry-run, never sends email")
     parser.add_argument("--discover", action="store_true", help="call the local SearXNG provider (local machine only)")
@@ -975,6 +988,10 @@ def run():
         )
         for department in CONTENT_DEPARTMENTS
     }
+    additional_checks.update(source_acquisition_checks(
+        discovery_status=discovery_status, fetch_requested=args.fetch,
+        planned_fetch_count=len(fetch_plan), fetched_count=len(sources),
+    ))
     additional_checks.update(
         {
             f"{department.value}_analysis_execution_complete": not any(
