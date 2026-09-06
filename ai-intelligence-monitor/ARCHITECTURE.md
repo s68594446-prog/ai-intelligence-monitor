@@ -119,6 +119,13 @@ completion. A request budget cannot shrink the coverage denominator or relax gat
 
 ## Publication and delivery boundary
 
+Phase 3C admission and final Ops share deterministic narrative-language and
+text-quality checks. Invalid individual outputs are audited and excluded before
+selection, without modifying facts or Evidence. A desk whose schema-valid outputs
+all fail language checks is blocked, not a healthy empty digest. Unexpected
+execution errors and any unprocessed candidates also block delivery. Optional
+empty risk/path fields and original-language quotes remain legal.
+
 The shared Phase 3C `ops_report.py` predicate requires Boolean `passed=true`,
 Boolean `true` for every supplied check, and an empty supplied error list at both
 publication and mail boundaries. Email reads exactly one `ops.json` block inside

@@ -15,11 +15,14 @@ from test_gemini_global_analysis import valid_output, response_for
 
 
 @pytest.mark.parametrize(
-    "request_cap,persistent_timeout,expected_pass",
-    [(65, False, True), (35, False, False), (65, True, False)],
+    "request_cap,persistent_timeout,defect,expected_pass",
+    [(65, False, None, True), (35, False, None, False), (65, True, None, False),
+     (65, False, "one_english", True), (65, False, "all_english", False),
+     (65, False, "china_english", False), (65, False, "risk_repetition", True),
+     (65, False, "unexpected", False)],
 )
 def test_full_daily_run_preserves_36_candidates_and_fails_closed(
-    monkeypatch, tmp_path, capsys, request_cap, persistent_timeout, expected_pass,
+    monkeypatch, tmp_path, capsys, request_cap, persistent_timeout, defect, expected_pass,
 ):
     domains = (
         ["openai.com"] * 6 + ["blog.google"] * 6 + ["nvidia.com"] * 6
@@ -82,11 +85,21 @@ def test_full_daily_run_preserves_36_candidates_and_fails_closed(
         if url == timeout_url and (persistent_timeout or attempts[url] == 1):
             raise httpx.ReadTimeout("offline-secret must not be logged", request=request)
         is_t2 = "leiphone.com" in url
+        if defect == "unexpected" and url == timeout_url:
+            raise RuntimeError("offline-secret must not be logged")
         output = valid_output(
             evidence=[{"quote": "100 systems", "source_url": url}],
             sourcing="SECONDHAND_REPORT" if is_t2 else "FIRSTHAND_OFFICIAL",
             original_source="公司公告" if is_t2 else "",
         )
+        if (defect == "one_english" and url == timeout_url
+                or defect == "all_english"
+                or defect == "china_english" and is_t2):
+            output.update(headline="Packaging equipment qualification update",
+                          what_happened="The supplier passed production qualification.",
+                          why_it_matters="Equipment qualification enables supply.")
+        if defect == "risk_repetition" and url == timeout_url:
+            output["risks_and_counterevidence"] = ["设备设备设备设备设备"]
         return httpx.Response(200, json=response_for(output))
 
     class Adapter(GeminiGlobalAiAnalysisAdapter):
@@ -131,8 +144,23 @@ def test_full_daily_run_preserves_36_candidates_and_fails_closed(
         assert summary["provider_validated_outputs"] == 36
         assert summary["provider_request_attempts"] == 38
         assert summary["unprocessed_candidate_count"] == 0
-        assert not failures
+        if defect:
+            assert len(failures) == 1
+            assert failures[0]["error_code"] == (
+                "OUTPUT_LANGUAGE_INVALID" if defect == "one_english" else "LOW_TEXT_QUALITY"
+            )
+            assert summary["analyzed"] == 35
+        else:
+            assert not failures
         assert "额度降级" in (run_dir / "04-digest.txt").read_text()
+    elif defect in {"all_english", "china_english"}:
+        assert summary["unprocessed_candidate_count"] == 0
+        assert "china_analysis_language_usable" in ops["errors"]
+        assert len(failures) == (36 if defect == "all_english" else 6)
+    elif defect == "unexpected":
+        assert summary["unprocessed_candidate_count"] == 0
+        assert "global_analysis_execution_complete" in ops["errors"]
+        assert failures[0]["error_code"] == "UNEXPECTED_RuntimeError"
     elif persistent_timeout:
         assert "global_department_complete" in ops["errors"]
         assert any(failure["error_code"] == "GEMINI_TIMEOUT" for failure in failures)

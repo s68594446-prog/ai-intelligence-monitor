@@ -48,13 +48,15 @@ from app.daily_ai.global_ops import (
     check_global_channel,
     neutrality_violations,
     numeric_claim_cited,
+    output_language_violations,
+    output_quality_violations,
     sourcing_matches_tier,
     sourcing_tier_diagnostics,
 )
 from app.daily_ai.juhe import JuheAiBriefAdapter, JuheError, JuheHeadlinesAdapter
 from app.daily_ai.ops import check_a_share_channel
 from app.daily_ai.pdf import SafeOfficialPdfFetcher
-from app.daily_ai.quality import check_text_quality, out_of_scope_headline
+from app.daily_ai.quality import out_of_scope_headline
 from app.daily_ai.rss import RssDiscoveryAdapter, RssError
 from app.daily_ai.source_history import load_recent_source_history
 from app.daily_ai.us_macro_discovery import (
@@ -665,12 +667,8 @@ def run():
                         department_validated[active_department] += 1
                         if is_macro_candidate:
                             macro_provider_validated_outputs += 1
-                        quality_reasons = check_text_quality({
-                            "headline": analysis.headline,
-                            "what_happened": analysis.what_happened,
-                            "why_it_matters": analysis.why_it_matters,
-                            "transmission_path": analysis.transmission_path,
-                        })
+                        language_fields = output_language_violations(analysis)
+                        quality_reasons = output_quality_violations(analysis)
                         scope_term = out_of_scope_headline(analysis.headline)
                         advice_terms = advice_violations(analysis)
                         non_neutral_terms = neutrality_violations(analysis)
@@ -680,6 +678,12 @@ def run():
                             analysis_failures.append({"url": candidate.canonical_url, "error_code": "DISCIPLINE_ADVICE", "diagnostics": {"matched_terms": advice_terms, "headline": analysis.headline[:120]}})
                         elif non_neutral_terms:
                             analysis_failures.append({"url": candidate.canonical_url, "error_code": "NON_NEUTRAL_FRAMING", "diagnostics": {"matched_terms": non_neutral_terms, "headline": analysis.headline[:120]}})
+                        elif language_fields:
+                            analysis_failures.append({
+                                "url": candidate.canonical_url,
+                                "error_code": "OUTPUT_LANGUAGE_INVALID",
+                                "diagnostics": {"fields": language_fields, "headline": analysis.headline[:120]},
+                            })
                         elif quality_reasons:
                             analysis_failures.append({"url": candidate.canonical_url, "error_code": "LOW_TEXT_QUALITY", "diagnostics": {"reasons": quality_reasons, "headline": analysis.headline[:120]}})
                         elif not numeric_claim_cited(analysis):
@@ -706,9 +710,9 @@ def run():
                             else:
                                 provider_halted = True
                     except (LLMOutputValidationError, LLMAdapterTimeout, LLMProviderError) as exc:
-                        analysis_failures.append({"url": candidate.canonical_url, "error_code": type(exc).__name__, "detail": str(exc)[:300]})
+                        analysis_failures.append({"url": candidate.canonical_url, "error_code": type(exc).__name__})
                     except Exception as exc:  # absolute fail-soft guard
-                        analysis_failures.append({"url": candidate.canonical_url, "error_code": f"UNEXPECTED_{type(exc).__name__}", "detail": str(exc)[:300]})
+                        analysis_failures.append({"url": candidate.canonical_url, "error_code": f"UNEXPECTED_{type(exc).__name__}"})
         finally:
             provider_request_attempts = sum(
                 item.request_count
@@ -971,6 +975,26 @@ def run():
         )
         for department in CONTENT_DEPARTMENTS
     }
+    additional_checks.update(
+        {
+            f"{department.value}_analysis_execution_complete": not any(
+                code.startswith("UNEXPECTED_")
+                or code in {"LLMAdapterTimeout", "LLMProviderError"}
+                for code in department_failures[department]
+            )
+            for department in CONTENT_DEPARTMENTS
+        }
+    )
+    additional_checks.update(
+        {
+            f"{department.value}_analysis_language_usable": (
+                department_validated[department] == 0
+                or department_failures[department].count("OUTPUT_LANGUAGE_INVALID")
+                < department_validated[department]
+            )
+            for department in CONTENT_DEPARTMENTS
+        }
+    )
     additional_checks.update(
         {
             f"{department.value}_department_complete": (

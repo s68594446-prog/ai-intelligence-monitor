@@ -176,13 +176,15 @@ jobs:
         run: python -m app.scripts.verify_daily_digest_ops
       - name: Prepare audited digest for delivery
         if: steps.guard.outputs.skip != 'true'
+        env:
+          DIGEST_DAY: ${{ steps.guard.outputs.day }}
         run: |
           DIGEST=$(ls -d ai-intelligence-monitor/runs/*-daily-ai/04-digest.txt 2>/dev/null | tail -1)
           if [ -z "$DIGEST" ]; then
-            echo "no digest produced; skipping commit"
-            exit 0
+            echo "::error::No current-run digest produced; delivery blocked"
+            exit 1
           fi
-          DAY=$(TZ=Asia/Shanghai date +%F)
+          DAY="$DIGEST_DAY"
           mkdir -p digests
           cp "$DIGEST" "digests/${DAY}.md"
           RUN_DIR=$(dirname "$DIGEST")
@@ -227,6 +229,7 @@ jobs:
         if: steps.guard.outputs.skip != 'true'
         working-directory: ai-intelligence-monitor/backend
         env:
+          DIGEST_DAY: ${{ steps.guard.outputs.day }}
           EMAIL_DELIVERY_ENABLED: "true"
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
           SMTP_PORT: ${{ secrets.SMTP_PORT }}
@@ -239,9 +242,9 @@ jobs:
         # SMTP server or send ledger unless send_email=true was explicit.
         run: |
           if [ "${{ steps.guard.outputs.send_email }}" = "true" ]; then
-            python -m app.scripts.send_digest_email --send
+            python -m app.scripts.send_digest_email --day "$DIGEST_DAY" --send
           else
-            python -m app.scripts.send_digest_email
+            python -m app.scripts.send_digest_email --day "$DIGEST_DAY"
           fi
       - name: Preserve delivery attempt ledger on failure
         if: failure() && steps.guard.outputs.send_email == 'true'
@@ -257,8 +260,10 @@ jobs:
           git push origin main
       - name: Commit delivered digest and email ledger
         if: steps.guard.outputs.skip != 'true' && steps.guard.outputs.send_email == 'true'
+        env:
+          DIGEST_DAY: ${{ steps.guard.outputs.day }}
         run: |
-          DAY=$(TZ=Asia/Shanghai date +%F)
+          DAY="$DIGEST_DAY"
           if [ -z "$(git status --porcelain -- "digests/${DAY}.md" digests/.email-log.jsonl digests/.source-history.jsonl)" ]; then
             echo "no digest or ledger change"; exit 0
           fi

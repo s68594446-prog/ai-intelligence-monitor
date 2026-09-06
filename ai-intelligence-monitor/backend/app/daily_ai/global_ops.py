@@ -8,12 +8,43 @@ from app.daily_ai.global_contracts import (
     quote_matches,
 )
 from app.daily_ai.global_digest import SECTOR_CAP, TOTAL_LIMIT
+from app.daily_ai.quality import check_text_quality
 from app.web_discovery.contracts import ClassifiedTier
 from app.web_discovery.source_policy import WebSourcePolicy, classify_url
 
 
 def _contains_cjk(text: str) -> bool:
     return any("一" <= ch <= "鿿" for ch in text)
+
+
+def narrative_fields(item: GlobalAiAnalysisContract) -> dict[str, str]:
+    """Model prose only: never translate or language-check exact source quotes.
+
+    Company/source names and enum values may legally remain in English.
+    Optional empty transmission/risk fields are honest, not missing news.
+    """
+    fields = {name: getattr(item, name) for name in (
+        "headline", "what_happened", "why_it_matters", "importance_reason",
+        "transmission_path",
+    )}
+    for name in ("risks_and_counterevidence", "uncertainties"):
+        fields.update({f"{name}[{index}]": value for index, value in enumerate(getattr(item, name))})
+    return fields
+
+
+def output_language_violations(item: GlobalAiAnalysisContract) -> list[str]:
+    """Same deterministic Chinese-prose screen at admission and final Ops.
+
+    This catches missing Chinese, not every mixed-language or stylistic defect.
+    It changes no text and does not consume an extra model request.
+    """
+    return [name for name, value in narrative_fields(item).items()
+            if not (name == "transmission_path" and not value.strip())
+            and not _contains_cjk(value)]
+
+
+def output_quality_violations(item: GlobalAiAnalysisContract) -> list[str]:
+    return check_text_quality(narrative_fields(item))
 
 
 CHINESE_NUMERALS = set("〇零一二两三四五六七八九十百千万亿兆")
@@ -228,8 +259,12 @@ def check_global_channel(
         return {
             "numeric_claims_cited": [numeric_diagnosis(a) for a in items if not numeric_cited(a)],
             "output_in_chinese": [
-                a.headline[:80] for a in items
-                if not (_contains_cjk(a.what_happened) and _contains_cjk(a.why_it_matters))
+                f"{a.headline[:80]} → {','.join(output_language_violations(a))}"
+                for a in items if output_language_violations(a)
+            ],
+            "output_text_quality": [
+                f"{a.headline[:80]} → {','.join(output_quality_violations(a))}"
+                for a in items if output_quality_violations(a)
             ],
         }
 
@@ -274,8 +309,12 @@ def check_global_channel(
         # A low-yield but fully processed day is honest. A low-yield day caused
         # by a halted provider with candidates left untouched is incomplete and
         # must fail closed before publication/email.
-        "analysis_coverage_complete": not (
-            provider_halted and unprocessed_candidate_count > 0
+        "analysis_coverage_complete": unprocessed_candidate_count == 0,
+        # Dropping every schema-valid response for language failure is not an
+        # honest empty day. A single bad article is still isolated fail-soft.
+        "analysis_language_usable": not (
+            analysis_provider_required and provider_validated_outputs > 0
+            and (provider_failure_codes or []).count("OUTPUT_LANGUAGE_INVALID") >= provider_validated_outputs
         ),
         "total_limit": len(digest_items) <= TOTAL_LIMIT,
         "sector_cap": all(count <= SECTOR_CAP for count in sector_counts.values()),
@@ -297,6 +336,7 @@ def check_global_channel(
             a.sourcing != "SECONDHAND_REPORT" or bool(a.original_source.strip()) for a in analyses
         ),
         "output_in_chinese": not offenders["output_in_chinese"],
+        "output_text_quality": not offenders["output_text_quality"],
     }
     return GlobalOpsResult(
         passed=all(checks.values()),

@@ -28,8 +28,8 @@ def test_daily_workflow_gates_before_publish_and_delivery():
     assert steps[gate]["run"].strip() == "python -m app.scripts.verify_daily_digest_ops"
     assert "git commit" not in steps[prepare]["run"]
     assert "steps.guard.outputs.send_email" in steps[email]["run"]
-    assert "python -m app.scripts.send_digest_email --send" in steps[email]["run"]
-    assert "python -m app.scripts.send_digest_email\n" in steps[email]["run"]
+    assert 'python -m app.scripts.send_digest_email --day "$DIGEST_DAY" --send' in steps[email]["run"]
+    assert 'python -m app.scripts.send_digest_email --day "$DIGEST_DAY"\n' in steps[email]["run"]
     assert "||" not in steps[email]["run"]
     assert "steps.guard.outputs.send_email == 'true'" in steps[commit]["if"]
     assert "digests/.source-history.jsonl" in steps[commit]["run"]
@@ -153,3 +153,17 @@ def test_backend_ci_runs_offline_tests_on_push_and_pull_request():
         "DEEPSEEK_API_KEY": "",
         "OPENAI_API_KEY": "",
     }
+
+
+def test_scheduled_sender_pins_one_date_and_missing_render_is_fatal():
+    workflow = yaml.safe_load((WORKFLOWS_DIR / "daily-digest.yml").read_text())
+    steps = {s.get("name"): s for s in workflow["jobs"]["digest"]["steps"]}
+    for name in ("Prepare audited digest for delivery",
+                 "Email the digest (Gate-checked; sends only if Ops passed)",
+                 "Commit delivered digest and email ledger"):
+        assert steps[name]["env"]["DIGEST_DAY"] == "${{ steps.guard.outputs.day }}"
+        assert "date +%F" not in steps[name]["run"]
+    prepare = steps["Prepare audited digest for delivery"]["run"]
+    missing = prepare.split('if [ -z "$DIGEST" ]; then', 1)[1].split("fi", 1)[0]
+    assert "exit 1" in missing
+    assert "exit 0" not in missing
