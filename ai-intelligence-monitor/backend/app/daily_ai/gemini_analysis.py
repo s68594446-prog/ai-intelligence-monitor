@@ -654,6 +654,12 @@ class GeminiGlobalAiAnalysisAdapter:
             or str(entry.source_url).rstrip("/") != source_url.rstrip("/")
         ]
         if failed:
+            self.request_events.append({
+                "source_url": source_url,
+                "model": request_model,
+                "request_number": self.request_count,
+                "reason_code": "CONTRACT_VALID_EVIDENCE_REJECTED",
+            })
             raise EvidenceMismatch(
                 "Gemini evidence quote mismatch",
                 diagnostics=[

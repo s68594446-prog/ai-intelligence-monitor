@@ -105,6 +105,7 @@ def test_acquisition_distinguishes_unavailable_from_healthy_empty(statuses, plan
 @pytest.mark.parametrize("attempts,validated,expected", [
     (0, 0, True), (7, 6, True), (21, 19, True),
     (5, 4, True), (5, 3, False), (20, 1, False), (1, 0, False),
+    (2, 1, True), (3, 2, True), (4, 3, True), (4, 2, False),
 ])
 def test_provider_response_coverage_is_explicit_and_bounded(attempts, validated, expected):
     assert provider_response_coverage_sufficient(

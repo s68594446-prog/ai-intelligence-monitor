@@ -19,6 +19,7 @@ from test_gemini_global_analysis import valid_output, response_for
     [(65, False, None, True), (35, False, None, False), (65, True, None, True),
      (65, False, "one_english", True), (65, False, "all_english", False),
      (65, False, "china_english", False), (65, False, "risk_repetition", True),
+     (65, False, "china_evidence_mismatch", True),
      (65, False, "unexpected", False), (65, False, "fetch_all_blocked", False),
      (65, False, "all_quality_invalid", False)],
 )
@@ -105,6 +106,8 @@ def test_full_daily_run_preserves_36_candidates_and_fails_closed(
             output["risks_and_counterevidence"] = ["设备设备设备设备设备"]
         if defect == "all_quality_invalid":
             output["uncertainties"] = ["设备设备设备设备设备"]
+        if defect == "china_evidence_mismatch" and url == candidates[-1].canonical_url:
+            output["evidence"] = [{"quote": "unsupported exact quote", "source_url": url}]
         return httpx.Response(200, json=response_for(output))
 
     class Adapter(GeminiGlobalAiAnalysisAdapter):
@@ -159,7 +162,9 @@ def test_full_daily_run_preserves_36_candidates_and_fails_closed(
         if defect or persistent_timeout:
             assert len(failures) == 1
             expected_code = "GEMINI_TIMEOUT" if persistent_timeout else (
-                "OUTPUT_LANGUAGE_INVALID" if defect == "one_english" else "LOW_TEXT_QUALITY")
+                "OUTPUT_LANGUAGE_INVALID" if defect == "one_english" else
+                "EVIDENCE_MISMATCH" if defect == "china_evidence_mismatch" else
+                "LOW_TEXT_QUALITY")
             assert failures[0]["error_code"] == expected_code
             assert summary["analyzed"] == 35
         else:

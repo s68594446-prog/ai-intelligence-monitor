@@ -89,6 +89,7 @@ PROJECT_DIR = Path(__file__).resolve().parents[3]
 SOURCE_HISTORY_PATH = PROJECT_DIR.parent / "digests/.source-history.jsonl"
 FETCH_MAX_BYTES = 5_000_000
 MIN_PROVIDER_RESPONSE_COVERAGE = 0.80
+SMALL_DEPARTMENT_POOL_MAX = 4
 # A T1 page we cannot fetch (403 / access challenge) may still be reachable
 # through a T2 retelling of the SAME event cluster. That substitute is fetched
 # normally and analysed as SECONDHAND_REPORT with its original source named —
@@ -204,7 +205,21 @@ def provider_response_coverage_sufficient(*, attempts: int, validated: int) -> b
     Evidence/language rejections happen after schema validation and have their
     own gates. This ratio measures provider transport/structure usability only.
     """
-    return attempts == 0 or validated / attempts >= MIN_PROVIDER_RESPONSE_COVERAGE
+    if attempts == 0:
+        return True
+    if validated / attempts >= MIN_PROVIDER_RESPONSE_COVERAGE:
+        return True
+    # A percentage-only gate is unstable for a small department: one isolated
+    # 503 makes a 2-4 item desk mathematically incapable of reaching 80% even
+    # though every candidate was attempted and the provider remained usable.
+    # Permit exactly one missing transport/structure response in that small
+    # pool. Content still has to pass the independent evidence, language,
+    # quality, advice and editorial gates below.
+    return (
+        attempts <= SMALL_DEPARTMENT_POOL_MAX
+        and validated > 0
+        and attempts - validated == 1
+    )
 
 
 def _args():
@@ -721,6 +736,16 @@ def run():
                             analyses.append(analysis)
                             analysis_urls[str(analysis.evidence[0].source_url)] = candidate.candidate_id
                     except EvidenceMismatch as exc:
+                        # Gemini returned valid JSON conforming to the Pydantic
+                        # contract, so the provider-response coverage is
+                        # healthy even though this item must still be rejected
+                        # by the exact Evidence gate. Keeping those two facts
+                        # separate prevents a valid rejection from looking like
+                        # a transport outage.
+                        provider_validated_outputs += 1
+                        department_validated[active_department] += 1
+                        if is_macro_candidate:
+                            macro_provider_validated_outputs += 1
                         analysis_failures.append({"url": candidate.canonical_url, "error_code": "EVIDENCE_MISMATCH", "diagnostics": exc.diagnostics})
                     except AnalysisOutputError as exc:
                         analysis_failures.append({"url": candidate.canonical_url, "error_code": exc.diagnostics.get("reason_code", type(exc).__name__), "diagnostics": exc.diagnostics})

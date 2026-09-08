@@ -286,6 +286,20 @@ def test_gemini_never_exceeds_explicit_provider_request_budget():
     assert caught.value.diagnostics["request_attempts"] == 1
 
 
+def test_contract_valid_evidence_mismatch_is_audited_as_provider_response():
+    output = valid_output(
+        evidence=[{"quote": "not present in source", "source_url": SOURCE_URL}]
+    )
+    analyzer = adapter(lambda request: httpx.Response(200, json=response_for(output)))
+
+    with pytest.raises(EvidenceMismatch):
+        analyzer.analyze(metadata={}, raw_text=RAW_TEXT, source_url=SOURCE_URL)
+
+    assert analyzer.request_events[-1]["reason_code"] == (
+        "CONTRACT_VALID_EVIDENCE_REJECTED"
+    )
+
+
 def test_gemini_minute_limit_uses_one_bounded_cooldown_then_continues():
     sleeps = []
     statuses = [429, 429, 200]
