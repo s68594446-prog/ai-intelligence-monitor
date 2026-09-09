@@ -39,6 +39,10 @@ class SMTPConfiguration:
 
 _HOST_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$")
 _DOMAIN_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$")
+# Fail closed on provider-domain typos that have caused a real delivery-risk
+# incident. Do not auto-correct: changing a sender identity must remain an
+# explicit operator action.
+_SUSPICIOUS_SENDER_DOMAINS = {"gamil.com"}
 
 
 def _has_header_break(value: str) -> bool:
@@ -83,6 +87,12 @@ def resolve_smtp_configuration(settings: Settings) -> tuple[SMTPConfiguration | 
     except ValueError:
         from_address = ""
         errors.append("SMTP_FROM_ADDRESS_INVALID")
+    from_domain_suspect = bool(
+        from_address
+        and from_address.rsplit("@", 1)[1] in _SUSPICIOUS_SENDER_DOMAINS
+    )
+    if from_domain_suspect:
+        errors.append("SMTP_FROM_ADDRESS_DOMAIN_SUSPECT")
     try:
         recipients = normalize_recipients(settings.smtp_to_addresses)
     except ValueError:
@@ -93,6 +103,8 @@ def resolve_smtp_configuration(settings: Settings) -> tuple[SMTPConfiguration | 
         domain = from_address.rsplit("@", 1)[1]
     if not domain or _has_header_break(domain) or not _DOMAIN_RE.fullmatch(domain):
         errors.append("SMTP_MESSAGE_ID_DOMAIN_INVALID")
+    elif domain in _SUSPICIOUS_SENDER_DOMAINS and not from_domain_suspect:
+        errors.append("SMTP_MESSAGE_ID_DOMAIN_SUSPECT")
     if errors:
         return None, errors
     return SMTPConfiguration(

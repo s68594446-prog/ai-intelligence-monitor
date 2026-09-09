@@ -37,3 +37,25 @@ def test_workflow_smtp_preflight_returns_only_bounded_codes(monkeypatch):
 
     assert result == {"valid": True, "error_codes": [], "network_calls": 0}
     assert "top-secret" not in str(result)
+
+
+def test_smtp_preflight_rejects_known_sender_domain_typo_without_echoing_address(
+    monkeypatch,
+):
+    monkeypatch.setenv("EMAIL_DELIVERY_ENABLED", "true")
+    monkeypatch.setenv("SMTP_HOST", "smtp.example.com")
+    monkeypatch.setenv("SMTP_PORT", "587")
+    monkeypatch.setenv("SMTP_USERNAME", "sender@gmail.com")
+    monkeypatch.setenv("SMTP_PASSWORD", "top-secret")
+    monkeypatch.setenv("SMTP_FROM", "private-user@gamil.com")
+    monkeypatch.setenv("SMTP_TO", "reader@example.net")
+
+    result = validate()
+
+    assert result == {
+        "valid": False,
+        "error_codes": ["SMTP_FROM_ADDRESS_DOMAIN_SUSPECT"],
+        "network_calls": 0,
+    }
+    assert "private-user" not in str(result)
+    assert "top-secret" not in str(result)
