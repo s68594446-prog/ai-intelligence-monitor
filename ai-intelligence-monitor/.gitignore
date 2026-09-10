@@ -27,3 +27,6 @@ runs/*
 !runs/.gitkeep
 fetches/*
 !fetches/.gitkeep
+
+# Local render/screenshot output. Reference previews under previews/ stay tracked.
+output/
