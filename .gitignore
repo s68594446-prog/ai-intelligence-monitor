@@ -1,0 +1,24 @@
+# Repository-root ignores.
+#
+# ai-intelligence-monitor/.gitignore covers the project subtree. This file
+# covers the repository root and digests/, which that file cannot reach.
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# iCloud Drive placeholder stubs. ~/Documents may be a synced folder; an
+# evicted file can surface as a placeholder that must never be committed.
+*.icloud
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local environments and secrets
+.venv/
+venv/
+.env
+.env.*
+!.env.example
