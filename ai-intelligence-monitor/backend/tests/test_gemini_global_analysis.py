@@ -337,6 +337,102 @@ def test_gemini_minute_limit_uses_one_bounded_cooldown_then_continues():
     assert sleeps == [60]
 
 
+def test_minute_limit_recovers_after_transient_retries_are_exhausted():
+    sleeps = []
+    statuses = [503, 503, 429, 200]
+    minute_quota = {
+        "error": {
+            "status": "RESOURCE_EXHAUSTED",
+            "details": [{
+                "violations": [{
+                    "quotaId": "GenerateRequestsPerMinutePerProjectPerModel-FreeTier"
+                }]
+            }],
+        }
+    }
+
+    def handler(request):
+        status = statuses.pop(0)
+        if status == 200:
+            return httpx.Response(200, json=response_for(valid_output()))
+        if status == 429:
+            return httpx.Response(
+                429,
+                headers={"Retry-After": "0"},
+                json=minute_quota,
+            )
+        return httpx.Response(503, json={"error": {"status": "UNAVAILABLE"}})
+
+    analyzer = adapter(
+        handler,
+        max_retries=2,
+        max_provider_requests=5,
+        sleep_fn=sleeps.append,
+    )
+
+    result = analyzer.analyze(metadata={}, raw_text=RAW_TEXT, source_url=SOURCE_URL)
+
+    assert isinstance(result, GlobalAiAnalysisContract)
+    assert analyzer.request_count == 4
+    assert analyzer.governor.minute_cooldown_used is True
+    assert sleeps == [1.0, 2.0, 0.0]
+    assert any(
+        event.get("reason_code") == "GEMINI_MINUTE_QUOTA_RECOVERY_SCHEDULED"
+        for event in analyzer.request_events
+    )
+
+
+def test_server_outage_gets_one_bounded_run_wide_recovery_pause():
+    sleeps = []
+    statuses = [503, 503, 503, 200]
+
+    def handler(request):
+        status = statuses.pop(0)
+        if status == 200:
+            return httpx.Response(200, json=response_for(valid_output()))
+        return httpx.Response(503, json={"error": {"status": "UNAVAILABLE"}})
+
+    analyzer = adapter(
+        handler,
+        max_retries=2,
+        max_provider_requests=5,
+        sleep_fn=sleeps.append,
+        rate_limit_cooldown_seconds=60,
+    )
+
+    result = analyzer.analyze(metadata={}, raw_text=RAW_TEXT, source_url=SOURCE_URL)
+
+    assert isinstance(result, GlobalAiAnalysisContract)
+    assert analyzer.request_count == 4
+    assert analyzer.governor.server_recovery_used is True
+    assert sleeps == [1.0, 2.0, 60]
+    assert any(
+        event.get("reason_code") == "GEMINI_SERVER_RECOVERY_SCHEDULED"
+        for event in analyzer.request_events
+    )
+
+
+def test_server_outage_recovery_remains_single_use_and_fail_closed():
+    sleeps = []
+    analyzer = adapter(
+        lambda request: httpx.Response(
+            503, json={"error": {"status": "UNAVAILABLE"}}
+        ),
+        max_retries=1,
+        max_provider_requests=6,
+        sleep_fn=sleeps.append,
+        rate_limit_cooldown_seconds=60,
+    )
+
+    with pytest.raises(ProviderCallError) as caught:
+        analyzer.analyze(metadata={}, raw_text=RAW_TEXT, source_url=SOURCE_URL)
+
+    assert caught.value.diagnostics["reason_code"] == "GEMINI_SERVER_ERROR"
+    assert caught.value.diagnostics["halt_provider_for_run"] is False
+    assert analyzer.request_count == 4
+    assert sleeps == [1.0, 60, 1.0]
+
+
 def test_shared_governor_paces_requests_across_candidates_and_adapters():
     class Clock:
         now = 0.0

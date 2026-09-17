@@ -172,6 +172,7 @@ class GeminiRequestGovernor:
         self._deadline = self._started_at + max_run_seconds
         self._last_request_at: float | None = None
         self.minute_cooldown_used = False
+        self.server_recovery_used = False
 
     def sleep(self, seconds: float) -> None:
         seconds = max(0.0, seconds)
@@ -202,6 +203,15 @@ class GeminiRequestGovernor:
         if self.minute_cooldown_used:
             return False
         self.minute_cooldown_used = True
+        self.sleep(seconds)
+        return True
+
+    def server_recovery_cooldown(self, seconds: float) -> bool:
+        """Allow one run-wide recovery pause after exhausted 5xx retries."""
+
+        if self.server_recovery_used:
+            return False
+        self.server_recovery_used = True
         self.sleep(seconds)
         return True
 
@@ -503,14 +513,54 @@ class GeminiGlobalAiAnalysisAdapter:
                 response.status_code == 429
                 and not daily_quota
                 and budget_remaining
-                and retry_number < self.max_retries
             ):
                 cooldown = min(
                     retry_after if retry_after is not None else self.rate_limit_cooldown_seconds,
                     self.rate_limit_cooldown_seconds,
                 )
                 if self.governor.minute_cooldown(cooldown):
-                    continue
+                    self.request_events.append({
+                        "source_url": source_url,
+                        "model": request_model,
+                        "request_number": self.request_count,
+                        "reason_code": "GEMINI_MINUTE_QUOTA_RECOVERY_SCHEDULED",
+                        "cooldown_seconds": round(cooldown, 3),
+                    })
+                    # Minute quota can arrive after earlier 5xx responses have
+                    # consumed this candidate's transient retry allowance. The
+                    # shared governor permits exactly one recovery pause for the
+                    # whole run, so restarting the candidate is bounded by that
+                    # flag, the request budget, and the run deadline.
+                    return self.analyze(
+                        metadata=metadata,
+                        raw_text=raw_text,
+                        source_url=source_url,
+                    )
+            if (
+                response.status_code >= 500
+                and retry_number >= self.max_retries
+                and budget_remaining
+                and self.governor.server_recovery_cooldown(
+                    self.rate_limit_cooldown_seconds
+                )
+            ):
+                self.request_events.append({
+                    "source_url": source_url,
+                    "model": request_model,
+                    "request_number": self.request_count,
+                    "reason_code": "GEMINI_SERVER_RECOVERY_SCHEDULED",
+                    "cooldown_seconds": round(
+                        self.rate_limit_cooldown_seconds, 3
+                    ),
+                })
+                # A short Gemini outage can span all per-candidate retries. One
+                # shared recovery pause gives the run a chance to resume without
+                # creating an unbounded retry loop or weakening downstream Ops.
+                return self.analyze(
+                    metadata=metadata,
+                    raw_text=raw_text,
+                    source_url=source_url,
+                )
             if (
                 response.status_code == 200
                 or not retryable
