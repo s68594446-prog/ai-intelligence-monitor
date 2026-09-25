@@ -87,7 +87,8 @@ class Settings(BaseSettings):
     gemini_search_model: str = Field(default="gemini-2.5-flash", validation_alias="GEMINI_SEARCH_MODEL")
     # Phase 3C analysis is isolated from the manual OpenAI/DeepSeek provider
     # selector above. A lower Gemini model may be enabled explicitly for a
-    # per-model daily-quota transition; the actual models remain auditable.
+    # per-model daily-quota transition or a separately enabled, one-time
+    # persistent-503 transition; the actual models remain auditable.
     gemini_analysis_model: str = Field(
         default="gemini-3.5-flash",
         pattern=r"^[A-Za-z0-9._-]+$",
@@ -101,6 +102,10 @@ class Settings(BaseSettings):
     gemini_quota_fallback_enabled: bool = Field(
         default=False,
         validation_alias="GEMINI_QUOTA_FALLBACK_ENABLED",
+    )
+    gemini_server_fallback_enabled: bool = Field(
+        default=False,
+        validation_alias="GEMINI_SERVER_FALLBACK_ENABLED",
     )
     gemini_base_url: str = Field(
         default="https://generativelanguage.googleapis.com/v1beta",

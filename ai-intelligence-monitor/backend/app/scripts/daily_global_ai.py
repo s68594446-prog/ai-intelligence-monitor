@@ -97,6 +97,18 @@ SMALL_DEPARTMENT_POOL_MAX = 4
 BLOCKED_FALLBACK_CODES = {"HTTP_403", "ACCESS_CHALLENGE", "HTTP_401", "HTTP_429"}
 
 
+def _analysis_model_label(
+    models_used: list[str], transitions: list[dict[str, str]]
+) -> str:
+    label = " → ".join(models_used)
+    if not transitions:
+        return label
+    reason = transitions[-1].get("reason_code")
+    if reason == "GEMINI_SERVER_ERROR_FALLBACK":
+        return f"{label}（服务故障降级）"
+    return f"{label}（额度降级）"
+
+
 def load_industry_keywords() -> list[str]:
     data = yaml.safe_load(KEYWORDS_PATH.read_text(encoding="utf-8"))
     return list(data["zh"]) + list(data["en"])
@@ -536,6 +548,7 @@ def run():
         primary_model=settings.gemini_analysis_model,
         fallback_model=settings.gemini_fallback_model,
         fallback_enabled=settings.gemini_quota_fallback_enabled,
+        server_fallback_enabled=settings.gemini_server_fallback_enabled,
     )
     department_budgets = {department: 0 for department in CONTENT_DEPARTMENTS}
     analysis_jobs = []
@@ -980,9 +993,9 @@ def run():
         )
     if args.render:
         actual_models = model_controller.models_used or [settings.gemini_analysis_model]
-        analysis_model_label = " → ".join(actual_models)
-        if model_controller.transitions:
-            analysis_model_label += "（额度降级）"
+        analysis_model_label = _analysis_model_label(
+            actual_models, model_controller.transitions
+        )
         digest_text = render_global_digest(
             digest_items,
             analysis_model=analysis_model_label,
@@ -1019,10 +1032,10 @@ def run():
         provider_failure_codes=[item["error_code"] for item in analysis_failures],
     )
     actual_models = model_controller.models_used or [settings.gemini_analysis_model]
-    analysis_model_label = " → ".join(actual_models)
     fallback_used = bool(model_controller.transitions)
-    if fallback_used:
-        analysis_model_label += "（额度降级）"
+    analysis_model_label = _analysis_model_label(
+        actual_models, model_controller.transitions
+    )
 
     # Each content desk must report its own usable provider and completion
     # state. One successful desk cannot mask a halted or unprocessed peer.
@@ -1138,6 +1151,7 @@ def run():
                 "analysis_model": analysis_model_label,
                 "primary_model": settings.gemini_analysis_model,
                 "configured_fallback_model": settings.gemini_fallback_model,
+                "server_fallback_enabled": settings.gemini_server_fallback_enabled,
                 "fallback_used": fallback_used,
                 "models_used": actual_models,
                 "model_transitions": model_controller.transitions,
@@ -1201,6 +1215,7 @@ def run():
         "analysis_runtime": {
             "primary_model": settings.gemini_analysis_model,
             "configured_fallback_model": settings.gemini_fallback_model,
+            "server_fallback_enabled": settings.gemini_server_fallback_enabled,
             "models_used": actual_models,
             "fallback_used": fallback_used,
             "model_transitions": model_controller.transitions,

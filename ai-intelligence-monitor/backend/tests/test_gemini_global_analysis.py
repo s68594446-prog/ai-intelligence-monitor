@@ -599,6 +599,77 @@ def test_gemini_analysis_model_defaults_stable_and_flash_lite_is_explicit():
     assert lite.gemini_analysis_model == "gemini-3.5-flash-lite"
     assert default.gemini_fallback_model is None
     assert default.gemini_quota_fallback_enabled is False
+    assert default.gemini_server_fallback_enabled is False
+
+
+def test_persistent_503_switches_once_to_explicit_server_fallback():
+    statuses = [503, 503, 503, 503, 200]
+    seen_urls = []
+    sleeps = []
+
+    def handler(request):
+        seen_urls.append(str(request.url))
+        status = statuses.pop(0)
+        if status == 200:
+            return httpx.Response(200, json=response_for(valid_output()))
+        return httpx.Response(503, json={"error": {"status": "UNAVAILABLE"}})
+
+    controller = GeminiModelController(
+        primary_model="gemini-3.5-flash",
+        fallback_model="gemini-3.5-flash-lite",
+        fallback_enabled=False,
+        server_fallback_enabled=True,
+    )
+    analyzer = adapter(
+        handler,
+        model_controller=controller,
+        max_retries=1,
+        max_provider_requests=6,
+        sleep_fn=sleeps.append,
+        rate_limit_cooldown_seconds=60,
+    )
+
+    result = analyzer.analyze(
+        metadata={}, raw_text=RAW_TEXT, source_url=SOURCE_URL
+    )
+
+    assert isinstance(result, GlobalAiAnalysisContract)
+    assert analyzer.request_count == 5
+    assert sleeps == [1.0, 60, 1.0]
+    assert all("gemini-3.5-flash:generateContent" in url for url in seen_urls[:4])
+    assert seen_urls[4].endswith(
+        "/models/gemini-3.5-flash-lite:generateContent"
+    )
+    assert controller.transitions == [{
+        "from_model": "gemini-3.5-flash",
+        "to_model": "gemini-3.5-flash-lite",
+        "reason_code": "GEMINI_SERVER_ERROR_FALLBACK",
+        "status_code": "503",
+    }]
+
+
+def test_persistent_503_never_switches_without_server_fallback_opt_in():
+    controller = GeminiModelController(
+        primary_model="gemini-3.5-flash",
+        fallback_model="gemini-3.5-flash-lite",
+        fallback_enabled=True,
+        server_fallback_enabled=False,
+    )
+    analyzer = adapter(
+        lambda request: httpx.Response(
+            503, json={"error": {"status": "UNAVAILABLE"}}
+        ),
+        model_controller=controller,
+        max_retries=0,
+        max_provider_requests=3,
+        sleep_fn=lambda seconds: None,
+    )
+
+    with pytest.raises(ProviderCallError):
+        analyzer.analyze(metadata={}, raw_text=RAW_TEXT, source_url=SOURCE_URL)
+
+    assert controller.active_model == "gemini-3.5-flash"
+    assert controller.transitions == []
 
 
 def test_daily_quota_switches_once_to_configured_lower_model_and_records_it():

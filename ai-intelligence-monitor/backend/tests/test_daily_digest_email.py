@@ -184,6 +184,17 @@ def test_html_header_discloses_actual_fallback_model_chain():
     assert "Gemini 3.5 Flash → Gemini 3.5 Flash Lite（额度降级）" in html
 
 
+def test_html_header_discloses_server_fallback_reason():
+    body = sample_digest().replace(
+        "Gemini 3.5 Flash · Prompt v9",
+        "Gemini 3.5 Flash → Gemini 3.5 Flash Lite（服务故障降级） · Prompt v9",
+    )
+
+    _, html = render_bodies("2026-09-25", body)
+
+    assert "Gemini 3.5 Flash → Gemini 3.5 Flash Lite（服务故障降级）" in html
+
+
 def test_failed_ops_gate_blocks_email_before_smtp(tmp_path, monkeypatch):
     digest = tmp_path / "2026-09-01.md"
     digest.write_text(
