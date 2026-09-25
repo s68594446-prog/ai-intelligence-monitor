@@ -89,9 +89,12 @@ def probe_gemini() -> dict:
     fallback_enabled = os.environ.get(
         "GEMINI_QUOTA_FALLBACK_ENABLED", "false"
     ).strip().casefold() in {"1", "true", "yes", "on"}
+    server_fallback_enabled = os.environ.get(
+        "GEMINI_SERVER_FALLBACK_ENABLED", "false"
+    ).strip().casefold() in {"1", "true", "yes", "on"}
     base_url = os.environ.get("GEMINI_BASE_URL", DEFAULT_BASE_URL)
     targets = [primary]
-    if fallback_enabled:
+    if fallback_enabled or server_fallback_enabled:
         if not fallback:
             return {
                 "target_models": targets,
@@ -117,6 +120,7 @@ def probe_gemini() -> dict:
         "target_model": primary,
         "target_models": targets,
         "fallback_enabled": fallback_enabled,
+        "server_fallback_enabled": server_fallback_enabled,
         "reachable": all(item["reachable"] for item in models.values()),
         "auth": (
             "PASS"

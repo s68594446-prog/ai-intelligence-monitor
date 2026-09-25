@@ -59,6 +59,7 @@ def test_daily_workflow_uses_gemini_without_deepseek_fallback():
     assert "GEMINI_ANALYSIS_MODEL" in analysis["env"]
     assert "GEMINI_FALLBACK_MODEL" in analysis["env"]
     assert "GEMINI_QUOTA_FALLBACK_ENABLED" in analysis["env"]
+    assert "GEMINI_SERVER_FALLBACK_ENABLED" in analysis["env"]
     assert "GEMINI_BASE_URL" in analysis["env"]
     assert "DEEPSEEK_API_KEY" not in analysis["env"]
     assert analysis["run"].strip().startswith("python -m app.scripts.daily_global_ai")
@@ -86,6 +87,7 @@ def test_env_probe_only_receives_gemini_configuration():
         "GEMINI_ANALYSIS_MODEL",
         "GEMINI_FALLBACK_MODEL",
         "GEMINI_QUOTA_FALLBACK_ENABLED",
+        "GEMINI_SERVER_FALLBACK_ENABLED",
         "GEMINI_BASE_URL",
     }
     assert step["env"]["GEMINI_API_KEY"] == "${{ secrets.GEMINI_API_KEY }}"

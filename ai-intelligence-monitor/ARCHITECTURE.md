@@ -99,18 +99,22 @@ artifact hash. Replay success is not a complete integrity or semantic re-audit.
 ## Gemini quota transition
 
 `GEMINI_ANALYSIS_MODEL` is the primary model. A lower model is eligible only
-when both `GEMINI_FALLBACK_MODEL` is configured and
-`GEMINI_QUOTA_FALLBACK_ENABLED=true`. The shared controller permits one switch
-only for an explicit per-model daily-quota response. It never switches on an
-ordinary rate limit, timeout, server error, content failure, or schema failure,
-and never changes provider. There is no automatic paid-model selection; operators
-must verify configured models' current quota/billing eligibility separately.
+when `GEMINI_FALLBACK_MODEL` is configured. The daily-quota path additionally
+requires `GEMINI_QUOTA_FALLBACK_ENABLED=true`. The persistent-503 path is a
+separate opt-in, `GEMINI_SERVER_FALLBACK_ENABLED=true`, and is considered only
+after ordinary retries plus the one shared server-recovery cooldown fail. The
+shared controller permits only one model transition. It never switches on an
+ordinary rate limit, timeout, non-503 server error, content failure, or schema
+failure, and never changes provider. There is no automatic paid-model selection;
+operators must verify configured models' current quota/billing eligibility
+separately.
 
 The request governor remains shared across departments while each desk keeps an
-independent logical budget. Models actually used and the transition reason are
-written to provider usage, Ops audit, source bundle, summary, plain-text digest,
-and HTML email. If the fallback also fails or any required desk remains
-incomplete, Ops blocks publication and email.
+independent logical budget. Models actually used and the transition reason
+(`GEMINI_DAILY_QUOTA_FALLBACK` or `GEMINI_SERVER_ERROR_FALLBACK`) are written to
+provider usage, Ops audit, source bundle, summary, plain-text digest, and HTML
+email. If the fallback also fails or any required desk remains incomplete, Ops
+blocks publication and email.
 
 The scheduled limits are 50 fetched candidates and 65 HTTP requests including
 retries and transition calls (CLI hard ceiling 80). Department allocations share

@@ -7,7 +7,7 @@ from app.daily_ai.dedup import cluster_texts
 from app.daily_ai.global_contracts import GlobalAiAnalysisContract
 from app.daily_ai.global_digest import render_global_digest, select_global_digest
 from app.daily_ai.gemini_analysis import GeminiGlobalAiAnalysisAdapter
-from app.scripts.daily_global_ai import _take_domain_diverse
+from app.scripts.daily_global_ai import _analysis_model_label, _take_domain_diverse
 from app.web_discovery.contracts import ClassifiedTier
 from app.web_discovery.source_policy import classify_url, load_source_policy
 
@@ -74,6 +74,28 @@ def test_text_digest_discloses_quota_fallback_model_chain():
         "Gemini 3.5 Flash → Gemini 3.5 Flash Lite（额度降级）"
         in rendered
     )
+
+
+def test_text_digest_discloses_server_fallback_reason():
+    rendered = render_global_digest(
+        [],
+        analysis_model=(
+            "gemini-3.5-flash → gemini-3.5-flash-lite（服务故障降级）"
+        ),
+        prompt_version="daily-global-ai-analysis-v9",
+    )
+
+    assert (
+        "Gemini 3.5 Flash → Gemini 3.5 Flash Lite（服务故障降级）"
+        in rendered
+    )
+
+
+def test_server_fallback_model_label_uses_audited_reason():
+    assert _analysis_model_label(
+        ["gemini-3.5-flash", "gemini-3.5-flash-lite"],
+        [{"reason_code": "GEMINI_SERVER_ERROR_FALLBACK"}],
+    ) == "gemini-3.5-flash → gemini-3.5-flash-lite（服务故障降级）"
 
 
 def test_same_company_safety_incident_is_clustered_across_different_wording():

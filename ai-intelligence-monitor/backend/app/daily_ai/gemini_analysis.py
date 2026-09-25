@@ -1,8 +1,9 @@
 """Gemini structured-output adapter for the isolated Phase 3C digest.
 
 The API key is sent only in the ``x-goog-api-key`` request header.  The
-adapter does not enable tools or Search Grounding. Only the explicitly enabled
-daily-quota model transition is allowed; providers are never changed. Output
+adapter does not enable tools or Search Grounding. Only explicitly enabled,
+one-time transitions to the configured lower Gemini model are allowed for
+daily quota or a persistent 503 outage; providers are never changed. Output
 still passes the existing Pydantic and exact-evidence validation.
 """
 
@@ -219,10 +220,10 @@ class GeminiRequestGovernor:
 class GeminiModelController:
     """Shared, explicit model state for all Phase 3C departments.
 
-    A switch is allowed only for the daily per-model free-tier quota and only
-    when the operator explicitly enabled and configured the fallback model.
-    The transition is immutable audit data; no provider or paid-model fallback
-    is inferred by the adapter.
+    A switch is allowed only for an explicitly enabled daily per-model quota or
+    persistent-503 policy, and only to the configured fallback model. The
+    transition is immutable audit data; no provider or paid-model fallback is
+    inferred by the adapter.
     """
 
     def __init__(
@@ -231,18 +232,20 @@ class GeminiModelController:
         primary_model: str,
         fallback_model: str | None = None,
         fallback_enabled: bool = False,
+        server_fallback_enabled: bool = False,
     ):
         if not MODEL_NAME.fullmatch(primary_model):
             raise ValueError("GEMINI_ANALYSIS_MODEL is invalid")
         if fallback_model and not MODEL_NAME.fullmatch(fallback_model):
             raise ValueError("GEMINI_FALLBACK_MODEL is invalid")
-        if fallback_enabled and not fallback_model:
+        if (fallback_enabled or server_fallback_enabled) and not fallback_model:
             raise ValueError("enabled Gemini fallback requires GEMINI_FALLBACK_MODEL")
         if fallback_model == primary_model:
             raise ValueError("Gemini fallback model must differ from primary model")
         self.primary_model = primary_model
         self.fallback_model = fallback_model
         self.fallback_enabled = fallback_enabled
+        self.server_fallback_enabled = server_fallback_enabled
         self.active_model = primary_model
         self.models_used: list[str] = []
         self.transitions: list[dict[str, str]] = []
@@ -267,6 +270,28 @@ class GeminiModelController:
                 "to_model": self.active_model,
                 "reason_code": "GEMINI_DAILY_QUOTA_FALLBACK",
                 "quota_id": quota_id,
+            }
+        )
+        return True
+
+    def activate_server_fallback(self, *, status_code: int) -> bool:
+        """Switch once after a persistent Gemini 503 outage, when enabled."""
+
+        if (
+            status_code != 503
+            or not self.server_fallback_enabled
+            or not self.fallback_model
+            or self.active_model != self.primary_model
+        ):
+            return False
+        previous = self.active_model
+        self.active_model = self.fallback_model
+        self.transitions.append(
+            {
+                "from_model": previous,
+                "to_model": self.active_model,
+                "reason_code": "GEMINI_SERVER_ERROR_FALLBACK",
+                "status_code": str(status_code),
             }
         )
         return True
@@ -556,6 +581,25 @@ class GeminiGlobalAiAnalysisAdapter:
                 # A short Gemini outage can span all per-candidate retries. One
                 # shared recovery pause gives the run a chance to resume without
                 # creating an unbounded retry loop or weakening downstream Ops.
+                return self.analyze(
+                    metadata=metadata,
+                    raw_text=raw_text,
+                    source_url=source_url,
+                )
+            if (
+                response.status_code == 503
+                and retry_number >= self.max_retries
+                and budget_remaining
+                and self.governor.server_recovery_used
+                and self.model_controller.activate_server_fallback(
+                    status_code=response.status_code
+                )
+            ):
+                self._sync_model()
+                # The primary model remained unavailable after normal retries
+                # and the one shared recovery pause. The explicitly enabled
+                # lower Gemini model gets one attempt path; the controller,
+                # request budget, and run deadline keep this transition bounded.
                 return self.analyze(
                     metadata=metadata,
                     raw_text=raw_text,
