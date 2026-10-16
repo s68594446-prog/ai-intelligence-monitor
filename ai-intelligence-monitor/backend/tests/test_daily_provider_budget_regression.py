@@ -21,7 +21,8 @@ from test_gemini_global_analysis import valid_output, response_for
      (65, False, "china_english", False), (65, False, "risk_repetition", True),
      (65, False, "china_evidence_mismatch", True),
      (65, False, "unexpected", False), (65, False, "fetch_all_blocked", False),
-     (65, False, "all_quality_invalid", False)],
+     (65, False, "all_quality_invalid", False),
+     (65, False, "global_503", False), (65, False, "global_timeout", False)],
 )
 def test_full_daily_run_preserves_36_candidates_and_fails_closed(
     monkeypatch, tmp_path, capsys, request_cap, persistent_timeout, defect, expected_pass,
@@ -86,6 +87,10 @@ def test_full_daily_run_preserves_36_candidates_and_fails_closed(
                 }]}],
             }})
         attempts[url] = attempts.get(url, 0) + 1
+        if "leiphone.com" not in url and defect == "global_503":
+            return httpx.Response(503, json={"error": {"status": "UNAVAILABLE"}})
+        if "leiphone.com" not in url and defect == "global_timeout":
+            raise httpx.ReadTimeout("offline failure", request=request)
         if url == timeout_url and (persistent_timeout or attempts[url] == 1):
             raise httpx.ReadTimeout("offline-secret must not be logged", request=request)
         is_t2 = "leiphone.com" in url
@@ -153,6 +158,15 @@ def test_full_daily_run_preserves_36_candidates_and_fails_closed(
     assert summary["provider_request_attempts"] <= request_cap
     assert ops["passed"] is expected_pass
     assert "offline-secret" not in json.dumps([events, failures])
+    if defect in {"global_503", "global_timeout"}:
+        china = json.loads((run_dir / "departments/china/provider-usage.json").read_text())
+        assert china["candidate_attempts"] == 6
+        assert china["validated_outputs"] == 6
+        assert china["provider_halted"] is False
+        assert summary["provider_halted"] is False
+        assert summary["unprocessed_candidate_count"] > 0
+        assert not ops["checks"]["department_delivery_ready"]
+        return
     assert any(event.get("reason_code") == "GEMINI_TIMEOUT" for event in events)
     if expected_pass:
         assert summary["analyze_attempts"] == 36

@@ -163,6 +163,7 @@ class GeminiRequestGovernor:
         *,
         minimum_interval_seconds: float,
         max_run_seconds: float,
+        max_provider_requests: int | None = None,
         sleep_fn=time.sleep,
         monotonic_fn=time.monotonic,
     ):
@@ -174,6 +175,8 @@ class GeminiRequestGovernor:
         self._last_request_at: float | None = None
         self.minute_cooldown_used = False
         self.server_recovery_used = False
+        self.max_provider_requests = max_provider_requests
+        self.request_count = 0
 
     def sleep(self, seconds: float) -> None:
         seconds = max(0.0, seconds)
@@ -188,6 +191,12 @@ class GeminiRequestGovernor:
         self._sleep(seconds)
 
     def before_request(self) -> None:
+        if self.max_provider_requests is not None and self.request_count >= self.max_provider_requests:
+            raise ProviderCallError(
+                "Gemini global request budget exhausted",
+                diagnostics={"reason_code": "GEMINI_GLOBAL_BUDGET_EXHAUSTED",
+                             "halt_scope": "global_budget", "halt_provider_for_run": True},
+            )
         now = self._clock()
         if now > self._deadline:
             self.sleep(0)
@@ -199,6 +208,7 @@ class GeminiRequestGovernor:
             if delay:
                 self.sleep(delay)
         self._last_request_at = self._clock()
+        self.request_count += 1
 
     def minute_cooldown(self, seconds: float) -> bool:
         if self.minute_cooldown_used:
@@ -453,7 +463,8 @@ class GeminiGlobalAiAnalysisAdapter:
                         "reason_code": "GEMINI_REQUEST_BUDGET_EXHAUSTED",
                         "request_attempts": request_attempts,
                         "provider_requests_total": self.request_count,
-                        "halt_provider_for_run": True,
+                        "halt_scope": "department_budget",
+                        "halt_provider_for_run": False,
                     },
                 )
             self._sync_model()
@@ -489,6 +500,8 @@ class GeminiGlobalAiAnalysisAdapter:
                     diagnostics={
                         "reason_code": "GEMINI_TIMEOUT",
                         "request_attempts": request_attempts,
+                        "halt_scope": "department_budget" if self.max_provider_requests is not None and self.request_count >= self.max_provider_requests else "request",
+                        "halt_provider_for_run": False,
                     },
                 ) from exc
             except httpx.RequestError as exc:
@@ -653,15 +666,19 @@ class GeminiGlobalAiAnalysisAdapter:
                     "status_code": response.status_code,
                     "request_attempts": request_attempts,
                     "provider_requests_total": self.request_count,
-                    # Authentication, daily quota, or the explicit request
-                    # budget halt the run. A minute quota failure remains
+                    # Only provider-wide authentication/quota failures halt
+                    # peers. A local adapter budget never does. Minute quota remains
                     # fail-soft after the one shared cooldown so later
                     # candidates can still be attempted within the hard budget.
                     "halt_provider_for_run": (
                         response.status_code in {401, 403}
                         or daily_quota
-                        or budget_exhausted
                     ),
+                    "halt_scope": (
+                        "provider" if response.status_code in {401, 403} or daily_quota
+                        else "department_budget" if budget_exhausted else "request"
+                    ),
+                    "recovery_exhausted": response.status_code >= 500 and retry_number >= self.max_retries,
                     **_safe_provider_diagnostics(response),
                 },
             )

@@ -634,6 +634,7 @@ def run():
                 governor = GeminiRequestGovernor(
                     minimum_interval_seconds=settings.gemini_min_request_interval_seconds,
                     max_run_seconds=settings.gemini_max_run_seconds,
+                    max_provider_requests=args.max_provider_requests,
                 )
                 supplemental_prompts = {
                     DepartmentId.CHINA: CHINA_PROMPT_PATH,
@@ -764,6 +765,8 @@ def run():
                         analysis_failures.append({"url": candidate.canonical_url, "error_code": exc.diagnostics.get("reason_code", type(exc).__name__), "diagnostics": exc.diagnostics})
                     except ProviderCallError as exc:
                         analysis_failures.append({"url": candidate.canonical_url, "error_code": exc.diagnostics.get("reason_code", type(exc).__name__), "diagnostics": exc.diagnostics})
+                        if exc.diagnostics.get("halt_scope") == "department_budget":
+                            department_halted[active_department] = True
                         if exc.diagnostics.get("halt_provider_for_run"):
                             reason = exc.diagnostics.get("reason_code")
                             if reason == "GEMINI_REQUEST_BUDGET_EXHAUSTED":
@@ -785,7 +788,6 @@ def run():
                 if item is not None:
                     item.close()
             fetch_client.close()
-    provider_halted = provider_halted or any(department_halted.values())
     for failure in analysis_failures:
         department = department_by_url.get(failure.get("url", ""))
         if department is not None:
