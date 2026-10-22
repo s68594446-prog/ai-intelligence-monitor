@@ -1,6 +1,7 @@
 name: backend-ci
 
 on:
+  workflow_dispatch:
   push:
     paths:
       - "ai-intelligence-monitor/backend/**"
