@@ -2,6 +2,7 @@
 
 import json
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import httpx
@@ -22,7 +23,8 @@ from test_gemini_global_analysis import valid_output, response_for
      (65, False, "china_evidence_mismatch", True),
      (65, False, "unexpected", False), (65, False, "fetch_all_blocked", False),
      (65, False, "all_quality_invalid", False),
-     (65, False, "global_503", False), (65, False, "global_timeout", False)],
+     (65, False, "global_503", False), (65, False, "global_timeout", False),
+     (65, False, "november5", False)],
 )
 def test_full_daily_run_preserves_36_candidates_and_fails_closed(
     monkeypatch, tmp_path, capsys, request_cap, persistent_timeout, defect, expected_pass,
@@ -32,6 +34,14 @@ def test_full_daily_run_preserves_36_candidates_and_fails_closed(
         + ["microsoft.com"] * 6 + ["amd.com"] * 6
         + ["leiphone.com"] * 6
     )
+    november5 = defect == "november5"
+    if november5:
+        # Same 28-candidate desk sizes as Actions 41956523977. Content and
+        # unobserved China responses are synthetic fixtures, never live news.
+        domains = (["home.treasury.gov"] + ["openai.com"] * 6 + ["blog.google"] * 6
+                   + ["nvidia.com"] * 6 + ["microsoft.com"] * 5 + ["leiphone.com"] * 4)
+    historical = json.loads((Path(__file__).parent / "fixtures/daily_20261105_provider_sequence.json").read_text()) if november5 else None
+    global_requests = []
     candidates = [
         NormalizedSearchResult(
             candidate_id=f"c-{i}", canonical_url=f"https://{domain}/ai-update-{i}",
@@ -80,18 +90,25 @@ def test_full_daily_run_preserves_36_candidates_and_fails_closed(
         seen_models.append(request.url.path)
         assert "x-goog-api-key" in request.headers
         assert "offline-secret" not in str(request.url)
-        if len(seen_models) == 1:
+        if len(seen_models) == 1 and not november5:
             return httpx.Response(429, json={"error": {
                 "status": "RESOURCE_EXHAUSTED", "details": [{"violations": [{
                     "quotaId": "GenerateRequestsPerDayPerProjectPerModel-FreeTier",
                 }]}],
             }})
         attempts[url] = attempts.get(url, 0) + 1
+        if november5 and "leiphone.com" not in url and "home.treasury.gov" not in url:
+            request_index = len(global_requests)
+            assert request_index < len(historical["global_http_statuses"])
+            status = historical["global_http_statuses"][request_index]
+            global_requests.append(status)
+            if status != 200:
+                return httpx.Response(status, json={"error": {"status": "UNAVAILABLE"}})
         if "leiphone.com" not in url and defect == "global_503":
             return httpx.Response(503, json={"error": {"status": "UNAVAILABLE"}})
         if "leiphone.com" not in url and defect == "global_timeout":
             raise httpx.ReadTimeout("offline failure", request=request)
-        if url == timeout_url and (persistent_timeout or attempts[url] == 1):
+        if not november5 and url == timeout_url and (persistent_timeout or attempts[url] == 1):
             raise httpx.ReadTimeout("offline-secret must not be logged", request=request)
         is_t2 = "leiphone.com" in url
         if defect == "unexpected" and url == timeout_url:
@@ -101,6 +118,11 @@ def test_full_daily_run_preserves_36_candidates_and_fails_closed(
             sourcing="SECONDHAND_REPORT" if is_t2 else "FIRSTHAND_OFFICIAL",
             original_source="公司公告" if is_t2 else "",
         )
+        if november5 and "leiphone.com" not in url and "home.treasury.gov" not in url:
+            if len(global_requests) in historical["invalid_language_request_numbers"]:
+                output["headline"] = "English-only headline must remain rejected"
+            if len(global_requests) == historical["uncited_numeric_request_number"]:
+                output["evidence"][0]["quote"] = "verified AI infrastructure update"
         if (defect == "one_english" and url == timeout_url
                 or defect == "all_english"
                 or defect == "china_english" and is_t2):
@@ -122,6 +144,7 @@ def test_full_daily_run_preserves_36_candidates_and_fails_closed(
     settings = Settings(
         _env_file=None, runs_dir=tmp_path / "runs", gemini_api_key="offline-secret",
         gemini_fallback_model="gemini-3.5-flash-lite", gemini_quota_fallback_enabled=True,
+        gemini_server_fallback_enabled=november5,
         smtp_configuration_prevalidated=True, llm_max_retries=2,
     )
     monkeypatch.setattr(daily, "Settings", lambda: settings)
@@ -145,6 +168,33 @@ def test_full_daily_run_preserves_36_candidates_and_fails_closed(
     ops = json.loads((run_dir / "ops.json").read_text())
     events = json.loads((run_dir / "provider-request-events.json").read_text())
     failures = json.loads((run_dir / "analysis-failures.json").read_text())
+    if november5:
+        usage = {desk: json.loads((run_dir / f"departments/{desk}/provider-usage.json").read_text())
+                 for desk in ("global", "china", "macro")}
+        assert global_requests == historical["global_http_statuses"]
+        assert usage["global"]["request_budget"] == usage["global"]["request_count"] == 36
+        assert usage["global"]["candidate_attempts"] == 15
+        assert usage["global"]["validated_outputs"] == 11
+        assert usage["china"]["candidate_attempts"] == usage["china"]["validated_outputs"] == 4
+        assert usage["china"]["request_budget"] == 16
+        assert usage["china"]["provider_halted"] is False
+        assert usage["macro"]["validated_outputs"] == 1
+        assert summary["analysis_candidate_count"] == 28
+        assert summary["provider_request_attempts"] == 41 < 65
+        assert summary["unprocessed_candidate_count"] == 8
+        assert summary["provider_halted"] is False
+        assert sum(e.get("status_code") == 503 for e in events) == 25
+        assert usage["global"]["model_transitions"][0]["reason_code"] == "GEMINI_SERVER_ERROR_FALLBACK"
+        assert len(usage["global"]["model_transitions"]) == 1
+        assert failures[-1]["diagnostics"]["halt_scope"] == "department_budget"
+        assert failures[-1]["error_code"] == "GEMINI_SERVER_ERROR"
+        assert not ops["passed"]
+        assert ops["checks"]["china_department_complete"]
+        assert ops["checks"]["macro_department_complete"]
+        assert not ops["checks"]["global_provider_response_coverage_sufficient"]
+        assert not ops["checks"]["department_delivery_ready"]
+        assert "offline-secret" not in json.dumps([events, failures])
+        return
     if defect == "fetch_all_blocked":
         assert summary["fetched"] == 0
         assert summary["provider_request_attempts"] == 0
