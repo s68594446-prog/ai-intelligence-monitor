@@ -100,8 +100,17 @@ Every run writes `departments/<department>/` with:
 departments. Files are created with write-once semantics. Department replay
 validates selected contract-bearing files and copies frozen JSON, recording `network_calls=0` and
 `llm_calls=0`; it never calls discovery, Gemini, or SMTP.
-It records the source handoff hash but does not currently verify every embedded
-artifact hash. Replay success is not a complete integrity or semantic re-audit.
+The original department replay remains frozen. New runs additionally write
+`artifact-integrity.json` through an isolated Phase 3C wrapper, binding all eight
+files for each desk and the explicitly listed top-level audit/body files.
+`python -m app.scripts.replay_digest_run --run-dir <RUN_DIR>` verifies file bytes,
+embedded handoff hashes, department identity, contract versions and delivery
+result consistency. Optional `--output <NEW_DIR>` copies only the verified byte
+snapshot after complete preflight; it never overwrites an existing directory.
+Historical runs without this seal are `REPLAY_LEGACY_UNSEALED`, not silently
+certified. Integrity success does not assert semantic correctness, Ops success
+or inbox delivery. Checksums are not a signature against deliberate replacement
+of both artifacts and their seal.
 
 ## Gemini quota transition
 

@@ -62,7 +62,31 @@ Each batch is a separate commit/PR and can be reverted independently using
 batches first when a later change depends on an earlier interface. Do not reset
 or delete working trees, publication archives or ledgers.
 
-## Batch 3 — next
+## Batch 3 — reading and reproducibility
 
-Mobile email layout, version documentation, dependency lock and stronger offline
-replay integrity, preserving the slate palette and all content/delivery gates.
+Root causes: fixed model/star columns squeezed mobile headlines; source URLs were
+hard to scan; package/API versions disagreed (0.1.0/0.2.0); each install resolved
+fresh dependency versions; old replay validated selected schemas but did not
+check every file or embedded hash and could leave partial output on failure.
+
+- Mobile cards use full-width titles, model metadata and source rows, while
+  retaining slate colors, inline styles, tables, escaped text and full link targets.
+- Package/API metadata share 0.3.0; model/prompt/contract versions stay separate.
+- Runtime and test locks pin the successful Batch 2 Linux CI dependency versions,
+  plus hashes. Build tools are locked separately. Install uses no dependency or
+  build resolver after those locks. No new model/provider dependency is added.
+- A new Phase 3C integrity wrapper seals complete department artifact sets and
+  selected top-level artifacts, validates before copying, and retains failed Ops
+  as failed. Original frozen replay and department Harness remain untouched.
+
+No live generation or email is required for these checks. Browser previews are
+not equivalent to Gmail/Apple Mail/Outlook inbox validation. Lock files prevent
+version drift but cannot prevent PyPI outages or guarantee vulnerability absence.
+The runner image and pip bootstrap are not locked. See [release notes](RELEASES.md).
+
+Offline acceptance on November 6: Batch 2 targeted 187/full 604; Batch 3 targeted
+99/full 644, each full run with one existing Starlette/httpx deprecation warning.
+Batch 3 used a fresh Python 3.13 environment installed with the hashed locks;
+`pip check` and `git diff --check` passed. Local browser checks at 320/375/660/1024
+pixels retained all 21 fixture links without horizontal overflow. Frozen paths
+and prompts had no changes. These results do not certify a future live digest.

@@ -10,8 +10,9 @@ The additive daily China AI channel is isolated from the frozen DRAM/HBM Signal 
 cd backend
 python3.13 -m venv .venv
 source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -e ".[dev]"
+python -m pip install --require-hashes --only-binary=:all: -r requirements-dev.lock -r requirements-build.lock
+python -m pip install --no-deps --no-build-isolation -e .
+python -m pip check
 alembic upgrade head
 pytest -q
 python -m app.scripts.seed_demo
@@ -39,6 +40,8 @@ The CLI uses `backend/data/monitor.db`, `config/coverage/dram_hbm.yaml`, `config
 Start with the [documentation map](docs/README.md). Frozen standards remain
 normative; [architecture](ARCHITECTURE.md) describes Phase 3C boundaries, and the
 [Phase 3C runbook](docs/PHASE_3C_RUNBOOK.md) covers diagnosis and controlled delivery.
+See [release and dependency notes](docs/RELEASES.md) for package/API versions,
+locked installation, offline artifact verification and rollback.
 
 ## Phase 1 configuration
 

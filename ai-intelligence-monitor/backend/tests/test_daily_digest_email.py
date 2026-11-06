@@ -87,6 +87,18 @@ def test_email_parser_and_header_counts_match_digest():
         assert sector in html
 
 
+def test_mobile_layout_keeps_model_and_full_source_targets_without_wide_columns():
+    body = sample_digest().replace("Gemini 3.5 Flash · Prompt v9", "Gemini 3.5 Flash → Gemini 3.5 Flash Lite（额度降级） · Prompt v9")
+    text, html = render_bodies("2026-11-06", body)
+    assert text == body
+    assert "Gemini 3.5 Flash → Gemini 3.5 Flash Lite（额度降级） · Prompt v9" in html
+    assert "width:220px" not in html
+    assert "width:112px" not in html
+    assert ">example.com</a>" in html
+    assert ">other.example.com</a>" in html
+    assert 'href="https://example.com/source-1?a=1&amp;b=2"' in html
+
+
 def test_email_html_escapes_content_and_makes_sources_clickable():
     _, html = render_bodies("2026-08-09", sample_digest())
 
