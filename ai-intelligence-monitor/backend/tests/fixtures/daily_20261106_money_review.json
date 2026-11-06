@@ -1,0 +1,9 @@
+{
+  "origin": "Actions 42164750075 source-bundle.json, preserved excerpt; not a new web fetch",
+  "source_url": "https://www.digitimes.com/news/a20261106PD227/ymtc-ipo-nand-equipment-manufacturing.html",
+  "source_excerpt": "YMTC's parent company, CCSH Corporation, had planned to raise CNY33 billion (approx. US$4.93 billion) through an IPO on Shanghai's STAR Market to finance production-line upgrades and next-generation memory research...",
+  "access_notice": "The article requires paid subscription.",
+  "incorrect_prose": "长江存储母公司计划募资33亿元人民币。",
+  "unit_correct_prose": "长江存储母公司曾计划募资330亿元人民币，原报道折合约49.3亿美元。",
+  "scope": "The corrected prose tests units only. The access notice still disqualifies the source; this fixture does not confirm a current IPO or payment."
+}

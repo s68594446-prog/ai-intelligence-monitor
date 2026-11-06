@@ -64,7 +64,15 @@ def test_september6_bad_model_prose_is_excluded_and_remaining_digest_passes_emai
                      provider_failure_codes=["OUTPUT_LANGUAGE_INVALID"])
     assert report.passed
     digest = tmp_path / "2026-09-06.md"
-    digest.write_text(render_global_digest(select_global_digest(accepted)) +
+    from app.daily_ai.final_review import review_rendered
+    body = render_global_digest(select_global_digest(accepted), analysis_model="offline-mock", prompt_version="v9")
+    review = review_rendered(day=digest.stem, body=body, raw_by_url={
+        str(item.evidence[0].source_url): " ".join(e.quote for e in item.evidence)
+        for item in accepted
+    })
+    assert review["passed"]
+    report = report.model_copy(update={"audit": {**report.audit, "final_review": review}})
+    digest.write_text(body +
                       "\n## 审计\n### ops.json\n```json\n" + report.model_dump_json() + "\n```\n")
     assert evaluate_digest(digest).ok
     assert len(accepted) == 1

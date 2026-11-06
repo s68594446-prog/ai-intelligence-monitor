@@ -32,7 +32,10 @@ from test_gemini_global_analysis import valid_output, response_for
      (65, False, "november6_auth", False),
      (65, False, "november6_503", False),
      (32, False, "november6_no_spare", False),
-     (65, False, "november6_low_score", True)],
+     (65, False, "november6_low_score", True),
+     (65, False, "paywall_all", False),
+     (65, False, "money_all", False),
+     (65, False, "render_loss", False)],
 )
 def test_full_daily_run_preserves_36_candidates_and_fails_closed(
     monkeypatch, tmp_path, capsys, request_cap, persistent_timeout, defect, expected_pass,
@@ -69,6 +72,10 @@ def test_full_daily_run_preserves_36_candidates_and_fails_closed(
         for i, domain in enumerate(domains)
     ]
     raw_text = "OpenAI announced a verified AI infrastructure update with 100 systems."
+    if defect == "money_all":
+        raw_text += " The project plans to raise CNY33 billion."
+    if defect == "paywall_all":
+        raw_text += " The article requires paid subscription."
     class Search:
         def __init__(self, **kwargs):
             pass
@@ -170,6 +177,9 @@ def test_full_daily_run_preserves_36_candidates_and_fails_closed(
             output["uncertainties"] = ["设备设备设备设备设备"]
         if defect == "china_evidence_mismatch" and url == candidates[-1].canonical_url:
             output["evidence"] = [{"quote": "unsupported exact quote", "source_url": url}]
+        if defect == "money_all":
+            output["headline"] = "人工智能项目计划融资33亿元人民币"
+            output["evidence"].append({"quote": "CNY33 billion", "source_url": url})
         return httpx.Response(200, json=response_for(output))
 
     class Adapter(GeminiGlobalAiAnalysisAdapter):
@@ -188,6 +198,10 @@ def test_full_daily_run_preserves_36_candidates_and_fails_closed(
     monkeypatch.setattr(daily, "normalize_search_pages", lambda *_: candidates)
     monkeypatch.setattr(daily, "WebPageFetcher", Fetch)
     monkeypatch.setattr(daily, "GeminiGlobalAiAnalysisAdapter", Adapter)
+    if defect == "render_loss":
+        original_renderer = daily.render_global_digest
+        monkeypatch.setattr(daily, "render_global_digest", lambda *a, **kw:
+                            original_renderer(*a, **kw) + "\n这段额外说明会在邮件HTML中消失。")
     monkeypatch.setattr(daily, "GeminiRequestGovernor", lambda **kwargs: GeminiRequestGovernor(
         **kwargs, sleep_fn=lambda _: None, monotonic_fn=lambda: 0,
     ))
@@ -203,6 +217,15 @@ def test_full_daily_run_preserves_36_candidates_and_fails_closed(
     ops = json.loads((run_dir / "ops.json").read_text())
     events = json.loads((run_dir / "provider-request-events.json").read_text())
     failures = json.loads((run_dir / "analysis-failures.json").read_text())
+    if expected_pass:
+        from app.daily_ai.email_digest import evaluate_digest
+        seal = ops["audit"]["final_review"]
+        assert "source_facts" not in seal and "claims" not in seal
+        digest = tmp_path / f'{seal["day"]}.md'
+        digest.write_text((run_dir / "04-digest.txt").read_text()
+                          + '\n---\n## 审计（本次 run 自报告）\n### ops.json\n```json\n'
+                          + json.dumps(ops) + '\n```\n')
+        assert evaluate_digest(digest).ok
     if november6:
         macro = json.loads((run_dir / "departments/macro/provider-usage.json").read_text())
         macro_ops = json.loads((run_dir / "departments/macro/ops.json").read_text())
@@ -269,12 +292,15 @@ def test_full_daily_run_preserves_36_candidates_and_fails_closed(
         assert not ops["checks"]["department_delivery_ready"]
         assert "offline-secret" not in json.dumps([events, failures])
         return
-    if defect == "fetch_all_blocked":
+    if defect in {"fetch_all_blocked", "paywall_all"}:
         assert summary["fetched"] == 0
         assert summary["provider_request_attempts"] == 0
         assert summary["digest_items"] == 0
         assert not ops["passed"]
         assert "source_fetch_usable" in ops["errors"]
+        if defect == "paywall_all":
+            blocked = json.loads((run_dir / "source-bundle.json").read_text())["blocked"]
+            assert all(row["error_code"] == "SOURCE_INCOMPLETE" for row in blocked)
         return
     assert summary["analysis_candidate_count"] == 36
     assert summary["fetched"] == 36
@@ -282,6 +308,20 @@ def test_full_daily_run_preserves_36_candidates_and_fails_closed(
     assert summary["provider_request_attempts"] <= request_cap
     assert ops["passed"] is expected_pass
     assert "offline-secret" not in json.dumps([events, failures])
+    if defect in {"money_all", "render_loss"}:
+        assert summary["unprocessed_candidate_count"] == 0
+        assert summary["provider_validated_outputs"] == 36
+        if defect == "money_all":
+            assert summary["digest_items"] == 0
+            assert all(f["error_code"] == "FACT_REVIEW_HOLD" for f in failures)
+            assert len(failures) == 36
+            assert "global_analysis_semantic_output_usable" in ops["errors"]
+        else:
+            assert summary["digest_items"] > 0
+            assert not failures
+            assert "final_rendered_review_passed" in ops["errors"]
+            assert ops["audit"]["final_review"]["passed"] is False
+        return
     if defect in {"global_503", "global_timeout"}:
         china = json.loads((run_dir / "departments/china/provider-usage.json").read_text())
         assert china["candidate_attempts"] == 6
