@@ -20,6 +20,9 @@ from app.daily_ai.global_analysis import (
     ProviderCallError,
 )
 from app.daily_ai.global_digest import render_global_digest, select_global_digest
+from app.daily_ai.final_review import review_fields, review_rendered, review_seal
+from app.daily_ai.article_integrity import DailyArticleExtractor, source_integrity_issues
+from app.daily_ai.global_ops import narrative_fields
 from app.daily_ai.department_harness import (
     CONTENT_DEPARTMENTS,
     DepartmentCandidate,
@@ -561,7 +564,7 @@ def run():
     }
     if args.fetch:
         fetch_client = httpx.Client(timeout=settings.web_search_timeout_seconds, follow_redirects=False, trust_env=False)
-        fetcher = WebPageFetcher(client=fetch_client, max_bytes=FETCH_MAX_BYTES, max_retries=0, minimum_interval_seconds=1)
+        fetcher = WebPageFetcher(client=fetch_client, max_bytes=FETCH_MAX_BYTES, max_retries=0, minimum_interval_seconds=1, text_extractor_factory=DailyArticleExtractor)
         allowed = {item.canonical_url for item in candidates}
         by_id = {item.candidate_id: item for item in candidates}
         planned_urls = {item.canonical_url for item in fetch_plan}
@@ -588,7 +591,10 @@ def run():
                 if result.status.value != "SUCCESS":
                     blocked.append({"url": candidate.canonical_url, "tier": candidate.source_tier.value, "status": result.status.value, "error_code": result.error_code})
                     continue
-                sources.append({"url": candidate.canonical_url, "tier": candidate.source_tier.value, "title": result.title or candidate.title, "sha256": result.response_sha256, "content_sha256": result.content_hash, "raw_text": result.raw_text})
+                if source_integrity_issues(result.raw_text):
+                    blocked.append({"url": candidate.canonical_url, "tier": candidate.source_tier.value, "status": "BLOCKED", "error_code": "SOURCE_INCOMPLETE"})
+                    continue
+                sources.append({"url": candidate.canonical_url, "tier": candidate.source_tier.value, "title": result.title or candidate.title, "sha256": result.response_sha256, "content_sha256": result.content_hash, "raw_text": result.raw_text, "extraction_version": DailyArticleExtractor.version})
                 # Compare the safely fetched text hash with the committed
                 # three-day publication history before spending Gemini quota.
                 # A changed page is analyzed normally; only the same canonical
@@ -773,6 +779,7 @@ def run():
                                 "fields": language_fields,
                                 "request_number": active_analyzer.request_count,
                             })
+                        fact_review = review_fields(narrative_fields(analysis), candidate.canonical_url, result.raw_text)
                         if scope_term:
                             analysis_failures.append({"url": candidate.canonical_url, "error_code": "OUT_OF_SCOPE_MARKET_ACTION", "diagnostics": {"matched_term": scope_term, "headline": analysis.headline[:120]}})
                         elif advice_terms:
@@ -789,6 +796,8 @@ def run():
                             analysis_failures.append({"url": candidate.canonical_url, "error_code": "LOW_TEXT_QUALITY", "diagnostics": {"reasons": quality_reasons, "headline": analysis.headline[:120]}})
                         elif not numeric_claim_cited(analysis):
                             analysis_failures.append({"url": candidate.canonical_url, "error_code": "NUMERIC_CLAIM_UNCITED", "diagnostics": {"headline": analysis.headline[:120], "quotes": [e.quote[:160] for e in analysis.evidence]}})
+                        elif not fact_review["passed"]:
+                            analysis_failures.append({"url": candidate.canonical_url, "error_code": "FACT_REVIEW_HOLD", "diagnostics": fact_review})
                         elif not sourcing_matches_tier(analysis, policy):
                             analysis_failures.append({
                                 "url": candidate.canonical_url,
@@ -1086,6 +1095,11 @@ def run():
         provider_halted=provider_halted,
         provider_failure_codes=[item["error_code"] for item in analysis_failures],
     )
+    final_review = review_rendered(
+        day=report_day.isoformat(), body=digest_text if args.render else "",
+        raw_by_url=raw_by_url, expected_urls={item["url"] for item in digest_items},
+    )
+    _write(run_dir / "final-review.json", final_review)
     actual_models = model_controller.models_used or [settings.gemini_analysis_model]
     fallback_used = bool(model_controller.transitions)
     analysis_model_label = _analysis_model_label(
@@ -1155,6 +1169,7 @@ def run():
     )
     additional_checks.update(
         {
+            "final_rendered_review_passed": args.render and final_review["passed"],
             "evidence_review_complete": evidence_status
             in {DepartmentStatus.HEALTHY, DepartmentStatus.HEALTHY_EMPTY},
             "editorial_complete": editorial_status
@@ -1201,6 +1216,7 @@ def run():
             },
             "audit": {
                 **ops.audit,
+                "final_review": review_seal(final_review),
                 "provider_request_budget": args.max_provider_requests,
                 "provider_request_attempts": provider_request_attempts,
                 "analysis_model": analysis_model_label,

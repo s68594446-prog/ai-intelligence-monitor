@@ -71,6 +71,7 @@ class WebPageFetcher:
         max_retries: int = 2,
         minimum_interval_seconds: float = 1,
         sleep_fn=time.sleep,
+        text_extractor_factory=_TextExtractor,
     ):
         self.client = client
         self.resolver = resolver
@@ -79,6 +80,7 @@ class WebPageFetcher:
         self.max_retries = min(max_retries, 2)
         self.minimum_interval_seconds = minimum_interval_seconds
         self.sleep_fn = sleep_fn
+        self.text_extractor_factory = text_extractor_factory
         self._last_request: dict[str, float] = {}
 
     def _blocked(self, result, status, code, **kwargs):
@@ -208,11 +210,13 @@ class WebPageFetcher:
             if content_type == "text/plain":
                 raw_text = decoded
             else:
-                parser = _TextExtractor()
+                parser = self.text_extractor_factory()
                 try:
                     parser.feed(decoded)
                 except Exception:
                     return self._blocked(result, FetchStatus.EXTRACTION_FAILED, "HTML_PARSE_ERROR", final_url=url, http_status=200, content_type=content_type, response_bytes=len(content), request_count=requests, retry_count=retries, redirect_count=redirects)
+                if getattr(parser, "error_code", None):
+                    return self._blocked(result, FetchStatus.BLOCKED, parser.error_code, final_url=url, http_status=200, content_type=content_type, response_bytes=len(content), request_count=requests, retry_count=retries, redirect_count=redirects)
                 raw_text = "\n".join(line for chunk in parser.text if (line := " ".join(chunk.split())))
                 title = " ".join(parser.title).strip() or parser.meta.get("og:title") or result.title
                 date_value = parser.meta.get("article:published_time") or parser.meta.get("date")

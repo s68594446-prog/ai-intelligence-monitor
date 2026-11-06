@@ -12,6 +12,7 @@ from app.daily_ai.email_digest import (
     render_bodies,
 )
 from app.delivery.contracts import EmailProviderResult
+from app.daily_ai.final_review import review_rendered
 
 
 SECTORS = [
@@ -217,7 +218,7 @@ def test_failed_ops_gate_blocks_email_before_smtp(tmp_path, monkeypatch):
     )
 
     assert result["status"] == "BLOCKED"
-    assert result["reasons"] == ["DIGEST_OPS_NOT_PASSED"]
+    assert "DIGEST_OPS_NOT_PASSED" in result["reasons"]
     assert not (tmp_path / ".email-log.jsonl").exists()
 
 
@@ -225,8 +226,14 @@ def test_sent_ledger_records_message_id_domain_and_acceptance_without_addresses(
     tmp_path, monkeypatch
 ):
     digest = tmp_path / "2026-08-12.md"
+    review = review_rendered(day=digest.stem, body=sample_digest(), raw_by_url={
+        item.source_url: "公司披露产业链变化。"
+        for section in parse_digest_sections(sample_digest()) for item in section.items
+    })
+    assert review["passed"]
     digest.write_text(
-        sample_digest() + '\n\n---\n## 审计\n### ops.json\n```json\n{"passed": true}\n```\n',
+        sample_digest() + '\n\n---\n## 审计\n### ops.json\n```json\n'
+        + json.dumps({"passed": True, "audit": {"final_review": review}}) + '\n```\n',
         encoding="utf-8",
     )
     settings = Settings(

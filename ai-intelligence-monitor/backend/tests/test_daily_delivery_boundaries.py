@@ -5,9 +5,16 @@ import pytest
 from app.core.settings import Settings
 from app.daily_ai.email_digest import EmailLedger, deliver_latest, evaluate_digest, idempotency_key
 from app.scripts.verify_daily_digest_ops import verify_latest_ops
+from app.daily_ai.final_review import review_rendered
 
 
-def prepare(tmp_path, report, day="2026-09-05", body="测试正文"):
+EMPTY_BODY = "AI产业链每日重点\n\n今日无达到标准的产业链重点新闻"
+
+
+def prepare(tmp_path, report, day="2026-09-05", body=EMPTY_BODY):
+    if isinstance(report, dict):
+        report = {**report, "audit": {"final_review": review_rendered(
+            day=day, body=body, raw_by_url={})}}
     path = tmp_path / f"{day}.md"
     path.write_text(body + "\n\n## 审计\n### ops.json\n```json\n" + json.dumps(report) + "\n```\n")
     return path
@@ -72,7 +79,7 @@ def test_uncertain_delivery_blocks_same_day_even_after_regeneration(tmp_path, mo
         smtp_host="smtp.example.com", smtp_port=587, smtp_username="sender@example.com",
         smtp_password="fake", smtp_from="sender@example.com", smtp_to="reader@example.com",
     )
-    key = idempotency_key("2026-09-05", "旧正文" if changed_body else "测试正文", ("reader@example.com",))
+    key = idempotency_key("2026-09-05", "旧正文" if changed_body else EMPTY_BODY, ("reader@example.com",))
     ledger = tmp_path / "ledger"
     ledger.write_text(json.dumps({"day": "2026-09-05", "idempotency_key": key, "status": status}) + "\n")
     before = ledger.read_bytes()

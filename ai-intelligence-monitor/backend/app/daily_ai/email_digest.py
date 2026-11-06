@@ -21,6 +21,7 @@ from urllib.parse import urlsplit
 
 from app.core.settings import Settings
 from app.daily_ai.ops_report import report_passed
+from app.daily_ai.final_review import leak_findings, verify_review_seal
 from app.delivery.contracts import EmailDeliveryRequest
 from app.delivery.email_adapter import (
     SMTPEmailDeliveryAdapter,
@@ -39,6 +40,7 @@ class DigestGateResult:
     day: str
     body: str
     ops_passed: bool
+    review: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -110,7 +112,22 @@ def evaluate_digest(path: Path) -> DigestGateResult:
         reasons.append("DIGEST_OPS_NOT_PASSED")
     if not body.strip():
         reasons.append("DIGEST_BODY_EMPTY")
-    return DigestGateResult(not reasons, reasons, path.stem, body, bool(ops))
+    appendix = markdown.partition(AUDIT_MARKER)[2]
+    matches = re.findall(r"### ops\.json\s*```json\s*(.*?)\s*```", appendix, re.S)
+    review = None
+    if len(matches) == 1:
+        try:
+            report = json.loads(matches[0])
+            audit = report.get("audit", {}) if isinstance(report, dict) else {}
+            review = audit.get("final_review") if isinstance(audit, dict) else None
+        except ValueError:
+            pass
+    text, markup = render_bodies(path.stem, body)
+    if not verify_review_seal(review, day=path.stem, body=body, text=text, markup=markup):
+        reasons.append("FINAL_REVIEW_MISSING_OR_STALE")
+    if any(leak_findings(value) for value in (body, text, markup)):
+        reasons.append("INTERNAL_FIELD_LEAK")
+    return DigestGateResult(not reasons, reasons, path.stem, body, bool(ops), review)
 
 
 FROM_DISPLAY_NAME = "AI Supply Chain Daily"
@@ -501,6 +518,11 @@ def deliver_latest(
     request, config_errors, key = build_request(settings, gate.day, gate.body)
     if request is None:
         return {"status": "BLOCKED", "day": gate.day, "reasons": config_errors}
+    # Review the actual MIME inputs, not just an earlier renderer invocation.
+    if (not verify_review_seal(gate.review, day=gate.day, body=gate.body,
+                               text=request.text_body, markup=request.html_body)
+            or leak_findings(request.text_body) or leak_findings(request.html_body)):
+        return {"status": "BLOCKED", "day": gate.day, "reasons": ["FINAL_BODY_CHANGED"]}
     ledger = EmailLedger(ledger_path)
     if ledger.already_sent(key):
         return {"status": "ALREADY_SENT", "day": gate.day, "idempotency_key": key, "recipient_count": len(request.to_addresses)}
