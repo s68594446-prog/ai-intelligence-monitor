@@ -66,8 +66,9 @@ def test_email_parser_and_header_counts_match_digest():
     assert "AI SUPPLY CHAIN INTELLIGENCE" in html
     assert "每日产业链关键变化与证据摘要" in html
     assert "分析模型 Gemini 3.5 Flash · Prompt v9" in html
-    assert "background-color:#7a1724" in html
-    assert "#0d2942" not in html
+    assert "background-color:#243746" in html
+    assert "background-color:#eef1f4" in html
+    assert "#7a1724" not in html
     assert "2026-08-09" in html
     assert re.search(r">7 <span[^>]*>条</span>", html)
     assert re.search(r">7 <span[^>]*>个</span>", html)

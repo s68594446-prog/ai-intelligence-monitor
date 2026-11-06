@@ -200,4 +200,4 @@ The day-level ledger guard prevents ordinary scheduled duplicates, and the deliv
 
 `.github/workflows/backend-ci.yml` runs the complete offline backend test suite on relevant pushes and pull requests with provider credentials forced empty. It never performs discovery, Gemini calls, or email delivery.
 
-The HTML alternative is a self-contained, table-based 660px intelligence brief with inline CSS and clickable source links. It contains no external images, fonts, scripts, remote CSS, tracking pixels, or audit appendix; the original plain-text alternative is unchanged.
+The HTML alternative is a self-contained, table-based 660px intelligence brief with a deep blue-gray header, pale gray backgrounds, gold importance stars, and inline CSS and clickable source links. It contains no external images, fonts, scripts, remote CSS, tracking pixels, or audit appendix; the original plain-text alternative is unchanged.
