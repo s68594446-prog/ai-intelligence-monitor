@@ -272,6 +272,13 @@ def _safe_link(url: str, *, label: str | None = None) -> str:
     )
 
 
+def _source_label(url: str) -> str:
+    try:
+        return urlsplit(url).hostname or url
+    except ValueError:
+        return url
+
+
 def _detail_row(label: str, value: str) -> str:
     return (
         '<tr><td style="padding:0 22px 16px 22px">'
@@ -299,7 +306,7 @@ def importance_stars(score: int) -> int:
 def _render_card(item: EmailDigestItem) -> str:
     stars = importance_stars(item.importance_score)
     score_label = f"{stars}/5" if item.importance_score >= 0 else "未记录"
-    source = _safe_link(item.source_url) if item.source_url else html.escape(
+    source = _safe_link(item.source_url, label=_source_label(item.source_url)) if item.source_url else html.escape(
         item.source_note or "未提供"
     )
     if item.source_note and item.source_url:
@@ -309,8 +316,8 @@ def _render_card(item: EmailDigestItem) -> str:
         )
     if item.other_sources:
         supplemental = "<br>".join(
-            _safe_link(url, label=f"补充来源 {index}")
-            for index, url in enumerate(item.other_sources, 1)
+            _safe_link(url, label=_source_label(url))
+            for url in item.other_sources
         )
     else:
         supplemental = '<span style="color:#94a3b8">无</span>'
@@ -323,10 +330,10 @@ def _render_card(item: EmailDigestItem) -> str:
         '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" '
         'style="width:100%;border-collapse:collapse"><tr>'
         f'<td style="font-size:17px;line-height:25px;color:#243746;font-weight:700;vertical-align:top">{html.escape(item.headline)}</td>'
-        '<td align="right" style="width:112px;padding-left:10px;white-space:nowrap;vertical-align:top">'
-        f'<span style="color:#d9972b;font-size:16px;letter-spacing:1px">{"★" * stars}</span>'
-        f'<span style="color:#cbd5df;font-size:16px;letter-spacing:1px">{"☆" * (5 - stars)}</span>'
-        f'<div style="font-size:11px;line-height:16px;color:#64727e">{score_label}</div>'
+        '</tr><tr><td style="padding-top:7px;white-space:nowrap">'
+        f'<span style="color:#d9972b;font-size:14px;letter-spacing:0">{"★" * stars}</span>'
+        f'<span style="color:#cbd5df;font-size:14px;letter-spacing:0">{"☆" * (5 - stars)}</span>'
+        f'<span style="padding-left:8px;font-size:11px;line-height:16px;color:#64727e">{score_label}</span>'
         '</td></tr></table></td></tr>'
         + _detail_row("发生了什么", item.what_happened)
         + _detail_row("产业链解读", item.analysis)
@@ -335,11 +342,11 @@ def _render_card(item: EmailDigestItem) -> str:
         + '<tr><td style="padding:0 22px 20px 22px">'
         '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
         'border="0" style="width:100%;background-color:#f3f6f8;border-collapse:collapse">'
-        '<tr><td style="width:50%;vertical-align:top;padding:12px 14px;border-right:1px solid #dce3e9">'
+        '<tr><td style="padding:12px 14px;border-bottom:1px solid #dce3e9">'
         '<div style="font-size:11px;line-height:16px;letter-spacing:.08em;color:#375d78;'
         'font-weight:700;margin-bottom:5px">原始来源</div>'
-        f'<div style="font-size:12px;line-height:19px">{source}</div></td>'
-        '<td style="width:50%;vertical-align:top;padding:12px 14px">'
+        f'<div style="font-size:12px;line-height:19px">{source}</div></td></tr>'
+        '<tr><td style="padding:12px 14px">'
         '<div style="font-size:11px;line-height:16px;letter-spacing:.08em;color:#375d78;'
         'font-weight:700;margin-bottom:5px">补充来源</div>'
         f'<div style="font-size:12px;line-height:19px">{supplemental}</div></td></tr>'
@@ -404,24 +411,23 @@ def render_bodies(day: str, body: str) -> tuple[str, str]:
         '<div style="font-size:13px;line-height:20px;color:#dbe4ea;margin-top:4px">'
         '每日产业链关键变化与证据摘要</div>'
         f'<div style="font-size:14px;line-height:22px;color:#dbe4ea;margin-top:8px">{html.escape(day)}</div>'
-        '</td><td align="right" style="width:220px;padding-left:14px;vertical-align:top">'
-        '<span style="display:inline-block;padding:7px 10px;background-color:#1b2c39;border:1px solid #536d80;'
-        'font-size:11px;line-height:17px;color:#ffffff;border-radius:4px">'
-        f'{html.escape(runtime_label)}</span></td></tr></table></td></tr>'
+        '<div style="margin-top:14px;padding:9px 12px;background-color:#1b2c39;border:1px solid #536d80;'
+        'font-size:11px;line-height:18px;color:#ffffff;border-radius:4px;word-break:break-word">'
+        f'{html.escape(runtime_label)}</div></td></tr></table></td></tr>'
         '<tr><td style="padding:18px 24px 10px 24px;background-color:#f5f7f9">'
         '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
         'border="0" style="width:100%;border-collapse:collapse">'
-        '<tr><td style="width:33.33%;padding:10px 12px;border-right:1px solid #dce3e9">'
+        '<tr><td style="width:33.33%;padding:10px 6px;border-right:1px solid #dce3e9">'
         '<div style="font-size:11px;color:#64727e;letter-spacing:.08em">新闻条数</div>'
         f'<div style="font-size:23px;line-height:30px;color:#2f4d63;font-weight:700">'
         f'{item_count} <span style="font-size:13px;font-weight:400">条</span></div></td>'
-        '<td style="width:33.33%;padding:10px 12px;border-right:1px solid #dce3e9">'
+        '<td style="width:33.33%;padding:10px 6px;border-right:1px solid #dce3e9">'
         '<div style="font-size:11px;color:#64727e;letter-spacing:.08em">覆盖产业链环节</div>'
         f'<div style="font-size:23px;line-height:30px;color:#2f4d63;font-weight:700">{section_count} '
         '<span style="font-size:13px;font-weight:400">个</span></div></td>'
-        '<td style="width:33.33%;padding:10px 12px">'
+        '<td style="width:33.33%;padding:10px 6px">'
         '<div style="font-size:11px;color:#64727e;letter-spacing:.08em">最高重要程度</div>'
-        f'<div style="font-size:19px;line-height:30px;color:#d9972b;font-weight:700">{"★" * highest_stars}'
+        f'<div style="font-size:14px;line-height:30px;color:#d9972b;font-weight:700">{"★" * highest_stars}'
         f'<span style="font-size:12px;color:#64727e;font-weight:400"> {highest_stars}/5</span></div></td>'
         '</tr></table></td></tr>'
         + "".join(section_html)

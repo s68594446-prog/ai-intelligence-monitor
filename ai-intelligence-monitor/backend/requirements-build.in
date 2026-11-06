@@ -1,0 +1,3 @@
+# Mirrors pyproject.toml build-system requirements; compile to a hashed lock.
+setuptools>=75
+wheel

@@ -1349,6 +1349,9 @@ def run():
     if a_share_ops is not None:
         summary["a_share_digest_items"] = len(a_share_items)
         summary["a_share_ops_passed"] = a_share_ops.passed
+    from app.daily_ai.replay_integrity import seal_run
+
+    seal_run(run_dir)
     print(json.dumps(summary, sort_keys=True))
 
 

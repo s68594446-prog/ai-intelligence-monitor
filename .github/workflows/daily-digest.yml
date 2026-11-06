@@ -50,8 +50,9 @@ jobs:
         if: steps.guard.outputs.skip != 'true'
         working-directory: ai-intelligence-monitor/backend
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e .
+          python -m pip install --require-hashes --only-binary=:all: -r requirements.lock -r requirements-build.lock
+          python -m pip install --no-deps --no-build-isolation -e .
+          python -m pip check
       - name: Validate SMTP configuration (no network)
         id: smtp-config
         if: steps.guard.outputs.skip != 'true'
