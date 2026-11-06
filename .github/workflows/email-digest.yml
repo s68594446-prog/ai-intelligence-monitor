@@ -28,6 +28,10 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
+        with:
+          # A queued manual sender must see the preceding sender's ledger.
+          # Production delivery always uses the latest reviewed main snapshot.
+          ref: main
       - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
