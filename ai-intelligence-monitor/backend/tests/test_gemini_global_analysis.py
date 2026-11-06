@@ -205,6 +205,8 @@ def test_gemini_timeout_is_distinct_and_secret_free():
     assert caught.value.diagnostics == {
         "reason_code": "GEMINI_TIMEOUT",
         "request_attempts": 1,
+        "halt_scope": "request",
+        "halt_provider_for_run": False,
     }
     assert API_KEY not in repr(caught.value)
 

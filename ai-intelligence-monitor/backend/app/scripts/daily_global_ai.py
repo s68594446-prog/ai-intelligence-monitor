@@ -544,6 +544,7 @@ def run():
         department: [] for department in CONTENT_DEPARTMENTS
     }
     department_halted = {department: False for department in CONTENT_DEPARTMENTS}
+    department_language_recovery_used = {department: False for department in CONTENT_DEPARTMENTS}
     model_controller = GeminiModelController(
         primary_model=settings.gemini_analysis_model,
         fallback_model=settings.gemini_fallback_model,
@@ -634,6 +635,7 @@ def run():
                 governor = GeminiRequestGovernor(
                     minimum_interval_seconds=settings.gemini_min_request_interval_seconds,
                     max_run_seconds=settings.gemini_max_run_seconds,
+                    max_provider_requests=args.max_provider_requests,
                 )
                 supplemental_prompts = {
                     DepartmentId.CHINA: CHINA_PROMPT_PATH,
@@ -704,6 +706,7 @@ def run():
                         })
                         department_halted[active_department] = True
                         continue
+                    candidate_provider_validated = False
                     try:
                         analysis = active_analyzer.analyze(
                             metadata={
@@ -716,6 +719,7 @@ def run():
                         )
                         provider_validated_outputs += 1
                         department_validated[active_department] += 1
+                        candidate_provider_validated = True
                         if is_macro_candidate:
                             macro_provider_validated_outputs += 1
                         language_fields = output_language_violations(analysis)
@@ -723,6 +727,52 @@ def run():
                         scope_term = out_of_scope_headline(analysis.headline)
                         advice_terms = advice_violations(analysis)
                         non_neutral_terms = neutrality_violations(analysis)
+                        # One bounded re-generation per desk, using the same
+                        # source/prompt/provider. Never translate or edit the
+                        # rejected prose, or reuse its score/evidence as a fix.
+                        # Keep one initial request reserved for each unattempted
+                        # candidate before admitting this optional recovery.
+                        if (language_fields and not quality_reasons and not scope_term
+                                and not advice_terms and not non_neutral_terms
+                                and department_attempts[active_department]
+                                == len(department_candidates[active_department])
+                                and not any(
+                                    department_by_url.get(str(item.evidence[0].source_url)) == active_department
+                                    for item in analyses
+                                )
+                                and not department_language_recovery_used[active_department]
+                                and active_analyzer.request_count
+                                + len(department_candidates[active_department])
+                                - department_attempts[active_department] < request_budget
+                                and governor.request_count + analysis_candidate_count
+                                - analyze_attempts < args.max_provider_requests):
+                            department_language_recovery_used[active_department] = True
+                            active_analyzer.request_events.append({
+                                "source_url": candidate.canonical_url,
+                                "reason_code": "OUTPUT_LANGUAGE_RETRY_SCHEDULED",
+                                "fields": language_fields,
+                                "request_number": active_analyzer.request_count,
+                            })
+                            analysis = active_analyzer.analyze(
+                                metadata={
+                                    "title": result.title or candidate.title,
+                                    "source_domain": urlsplit(candidate.canonical_url).hostname or "",
+                                    "source_tier": candidate.source_tier.value,
+                                },
+                                raw_text=result.raw_text,
+                                source_url=candidate.canonical_url,
+                            )
+                            language_fields = output_language_violations(analysis)
+                            quality_reasons = output_quality_violations(analysis)
+                            scope_term = out_of_scope_headline(analysis.headline)
+                            advice_terms = advice_violations(analysis)
+                            non_neutral_terms = neutrality_violations(analysis)
+                            active_analyzer.request_events.append({
+                                "source_url": candidate.canonical_url,
+                                "reason_code": "OUTPUT_LANGUAGE_RETRY_COMPLETED",
+                                "fields": language_fields,
+                                "request_number": active_analyzer.request_count,
+                            })
                         if scope_term:
                             analysis_failures.append({"url": candidate.canonical_url, "error_code": "OUT_OF_SCOPE_MARKET_ACTION", "diagnostics": {"matched_term": scope_term, "headline": analysis.headline[:120]}})
                         elif advice_terms:
@@ -755,15 +805,18 @@ def run():
                         # by the exact Evidence gate. Keeping those two facts
                         # separate prevents a valid rejection from looking like
                         # a transport outage.
-                        provider_validated_outputs += 1
-                        department_validated[active_department] += 1
-                        if is_macro_candidate:
-                            macro_provider_validated_outputs += 1
+                        if not candidate_provider_validated:
+                            provider_validated_outputs += 1
+                            department_validated[active_department] += 1
+                            if is_macro_candidate:
+                                macro_provider_validated_outputs += 1
                         analysis_failures.append({"url": candidate.canonical_url, "error_code": "EVIDENCE_MISMATCH", "diagnostics": exc.diagnostics})
                     except AnalysisOutputError as exc:
                         analysis_failures.append({"url": candidate.canonical_url, "error_code": exc.diagnostics.get("reason_code", type(exc).__name__), "diagnostics": exc.diagnostics})
                     except ProviderCallError as exc:
                         analysis_failures.append({"url": candidate.canonical_url, "error_code": exc.diagnostics.get("reason_code", type(exc).__name__), "diagnostics": exc.diagnostics})
+                        if exc.diagnostics.get("halt_scope") == "department_budget":
+                            department_halted[active_department] = True
                         if exc.diagnostics.get("halt_provider_for_run"):
                             reason = exc.diagnostics.get("reason_code")
                             if reason == "GEMINI_REQUEST_BUDGET_EXHAUSTED":
@@ -785,7 +838,6 @@ def run():
                 if item is not None:
                     item.close()
             fetch_client.close()
-    provider_halted = provider_halted or any(department_halted.values())
     for failure in analysis_failures:
         department = department_by_url.get(failure.get("url", ""))
         if department is not None:
@@ -852,6 +904,9 @@ def run():
             failure_codes=(department_failures[department]
                            if not response_coverage_ok else []),
         )
+        if department_validated[department] > 0 and not accepted:
+            # Fully rejected outputs are unusable, not a healthy empty desk.
+            status = DepartmentStatus.FAILED
         content_statuses[department] = status
         active = analyzers[department]
         usage = ProviderUsage(

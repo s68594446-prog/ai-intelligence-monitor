@@ -1,0 +1,9 @@
+{
+  "source_run_id": 41956523977,
+  "source_artifact_id": 13384111288,
+  "source_artifact_sha256": "4cffe901eb32b509743e62d80715bab9a8905c6fb9aae8f8a185c94f4040f3e2",
+  "global_http_statuses": [503,503,503,200,503,503,503,503,503,503,503,503,200,200,200,503,503,200,503,200,200,503,200,200,503,200,503,503,503,503,503,503,503,200,503,503],
+  "invalid_language_request_numbers": [14,15,21,34],
+  "uncited_numeric_request_number": 13,
+  "note": "Only observed request outcomes and rejection positions are replayed. Article prose and responses for previously unattempted China candidates are synthetic offline fixtures; they cannot be published."
+}
