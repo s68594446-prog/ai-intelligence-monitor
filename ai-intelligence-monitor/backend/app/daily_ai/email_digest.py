@@ -21,6 +21,8 @@ from urllib.parse import urlsplit
 
 from app.core.settings import Settings
 from app.daily_ai.ops_report import report_passed
+from app.daily_ai.delivery_ledger import EmailLedger, LedgerError, audit_hash
+from contextlib import nullcontext
 from app.daily_ai.final_review import leak_findings, verify_review_seal
 from app.delivery.contracts import EmailDeliveryRequest
 from app.delivery.email_adapter import (
@@ -41,6 +43,7 @@ class DigestGateResult:
     body: str
     ops_passed: bool
     review: dict | None = None
+    audit_sha256: str | None = None
 
 
 @dataclass(frozen=True)
@@ -115,6 +118,7 @@ def evaluate_digest(path: Path) -> DigestGateResult:
     appendix = markdown.partition(AUDIT_MARKER)[2]
     matches = re.findall(r"### ops\.json\s*```json\s*(.*?)\s*```", appendix, re.S)
     review = None
+    report = None
     if len(matches) == 1:
         try:
             report = json.loads(matches[0])
@@ -127,7 +131,8 @@ def evaluate_digest(path: Path) -> DigestGateResult:
         reasons.append("FINAL_REVIEW_MISSING_OR_STALE")
     if any(leak_findings(value) for value in (body, text, markup)):
         reasons.append("INTERNAL_FIELD_LEAK")
-    return DigestGateResult(not reasons, reasons, path.stem, body, bool(ops), review)
+    return DigestGateResult(not reasons, reasons, path.stem, body, bool(ops), review,
+                            audit_hash(report) if isinstance(report, dict) else None)
 
 
 FROM_DISPLAY_NAME = "AI Supply Chain Daily"
@@ -445,33 +450,6 @@ def idempotency_key(day: str, body: str, recipients: tuple[str, ...]) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-class EmailLedger:
-    """Append-only committed record of send attempts; the idempotency store."""
-
-    def __init__(self, path: Path):
-        self.path = path
-
-    def _entries(self) -> list[dict]:
-        if not self.path.is_file():
-            return []
-        return [json.loads(line) for line in self.path.read_text(encoding="utf-8").splitlines() if line.strip()]
-
-    def already_sent(self, key: str) -> bool:
-        return any(entry.get("idempotency_key") == key and entry.get("status") == "SENT" for entry in self._entries())
-
-    def unresolved_attempt(self, key: str, day: str) -> bool:
-        latest = {}
-        for entry in self._entries():
-            if entry.get("idempotency_key") == key or entry.get("day") == day:
-                latest[entry.get("idempotency_key")] = entry.get("status")
-        return any(status in {"PENDING", "UNKNOWN"} for status in latest.values())
-
-    def append(self, entry: dict) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps({**entry, "recorded_at": datetime.now(timezone.utc).isoformat()}, ensure_ascii=False) + "\n")
-
-
 def build_request(settings: Settings, day: str, body: str) -> tuple[EmailDeliveryRequest | None, list[str], str | None]:
     configuration, errors = resolve_smtp_configuration(settings)
     if configuration is None:
@@ -491,7 +469,7 @@ def build_request(settings: Settings, day: str, body: str) -> tuple[EmailDeliver
     return request, [], key
 
 
-def deliver_latest(
+def _deliver_latest(
     settings: Settings,
     *,
     digests_dir: Path,
@@ -524,7 +502,7 @@ def deliver_latest(
             or leak_findings(request.text_body) or leak_findings(request.html_body)):
         return {"status": "BLOCKED", "day": gate.day, "reasons": ["FINAL_BODY_CHANGED"]}
     ledger = EmailLedger(ledger_path)
-    if ledger.already_sent(key):
+    if ledger.already_sent(key, gate.day):
         return {"status": "ALREADY_SENT", "day": gate.day, "idempotency_key": key, "recipient_count": len(request.to_addresses)}
     if ledger.unresolved_attempt(key, gate.day):
         return {"status": "BLOCKED", "day": gate.day, "reasons": ["PRIOR_DELIVERY_OUTCOME_UNRESOLVED"]}
@@ -532,6 +510,8 @@ def deliver_latest(
         return {"status": "READY", "day": gate.day, "idempotency_key": key, "recipient_count": len(request.to_addresses), "dry_run": True}
 
     tracking = {
+        "audit_sha256": gate.audit_sha256,
+        "body_sha256": hashlib.sha256(gate.body.strip().encode()).hexdigest(),
         "message_id": request.message_id,
         "sender_domain": request.from_address.rsplit("@", 1)[1],
     }
@@ -547,3 +527,11 @@ def deliver_latest(
     accepted_at = datetime.now(timezone.utc).isoformat()
     ledger.append({"idempotency_key": key, "day": gate.day, "status": "SENT", "recipient_count": len(request.to_addresses), "smtp_accepted_at": accepted_at, "provider_message_id": provider_result.provider_message_id, **tracking})
     return {"status": "SENT", "day": gate.day, "idempotency_key": key, "recipient_count": len(request.to_addresses), "message_id": request.message_id, "smtp_accepted_at": accepted_at}
+
+
+def deliver_latest(settings: Settings, *, digests_dir: Path, ledger_path: Path, send: bool, day: str | None = None) -> dict:
+    try:
+        with EmailLedger(ledger_path).lock() if send else nullcontext():
+            return _deliver_latest(settings, digests_dir=digests_dir, ledger_path=ledger_path, send=send, day=day)
+    except LedgerError as exc:
+        return {"status": "BLOCKED", "day": day, "reasons": [str(exc)]}

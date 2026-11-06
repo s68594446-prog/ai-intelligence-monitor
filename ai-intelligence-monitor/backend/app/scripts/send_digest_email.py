@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 from pathlib import Path
 
 from app.core.settings import Settings
@@ -26,6 +27,9 @@ def main():
         day=args.day,
     )
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+    if os.environ.get("GITHUB_OUTPUT"):
+        with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+            output.write(f"delivery_status={result['status']}\n")
     # Exit codes: 0 = READY/SENT/ALREADY_SENT, 2 = Gate blocked, 1 = failed/unknown
     if result["status"] in {"READY", "SENT", "ALREADY_SENT"}:
         raise SystemExit(0)
