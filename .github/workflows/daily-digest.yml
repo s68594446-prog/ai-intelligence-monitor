@@ -27,6 +27,10 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
+        with:
+          # Resolve after acquiring shared concurrency so the ledger includes
+          # any sender that completed while this run was queued.
+          ref: main
       - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
