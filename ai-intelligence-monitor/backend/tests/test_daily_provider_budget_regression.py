@@ -24,7 +24,15 @@ from test_gemini_global_analysis import valid_output, response_for
      (65, False, "unexpected", False), (65, False, "fetch_all_blocked", False),
      (65, False, "all_quality_invalid", False),
      (65, False, "global_503", False), (65, False, "global_timeout", False),
-     (65, False, "november5", False)],
+     (65, False, "november5", False),
+     (65, False, "november6_recovered", True),
+     (65, False, "november6_english", False),
+     (65, False, "november6_evidence", False),
+     (65, False, "november6_schema", False),
+     (65, False, "november6_auth", False),
+     (65, False, "november6_503", False),
+     (32, False, "november6_no_spare", False),
+     (65, False, "november6_low_score", True)],
 )
 def test_full_daily_run_preserves_36_candidates_and_fails_closed(
     monkeypatch, tmp_path, capsys, request_cap, persistent_timeout, defect, expected_pass,
@@ -35,11 +43,19 @@ def test_full_daily_run_preserves_36_candidates_and_fails_closed(
         + ["leiphone.com"] * 6
     )
     november5 = defect == "november5"
+    november6 = bool(defect and defect.startswith("november6_"))
     if november5:
         # Same 28-candidate desk sizes as Actions 41956523977. Content and
         # unobserved China responses are synthetic fixtures, never live news.
         domains = (["home.treasury.gov"] + ["openai.com"] * 6 + ["blog.google"] * 6
                    + ["nvidia.com"] * 6 + ["microsoft.com"] * 5 + ["leiphone.com"] * 4)
+    if november6:
+        # November 6: 26 Global + 5 China + 1 Macro. The actual rejected
+        # risk strings were not retained by the old audit; reproduce only
+        # the two observed non-Chinese risk-field failures using mock prose.
+        domains = (["home.treasury.gov"] + ["openai.com"] * 6 + ["blog.google"] * 6
+                   + ["nvidia.com"] * 6 + ["microsoft.com"] * 6 + ["amd.com"] * 2
+                   + ["leiphone.com"] * 5)
     historical = json.loads((Path(__file__).parent / "fixtures/daily_20261105_provider_sequence.json").read_text()) if november5 else None
     global_requests = []
     candidates = [
@@ -80,6 +96,7 @@ def test_full_daily_run_preserves_36_candidates_and_fails_closed(
             )
 
     attempts = {}
+    inputs_by_url = {}
     seen_models = []
     timeout_url = candidates[1].canonical_url
 
@@ -87,16 +104,27 @@ def test_full_daily_run_preserves_36_candidates_and_fails_closed(
         payload = json.loads(request.content)
         metadata = json.loads(payload["contents"][0]["parts"][0]["text"])
         url = metadata["source_url"]
+        if url in inputs_by_url:
+            assert metadata == inputs_by_url[url]  # no rewritten source/prompt
+        inputs_by_url[url] = metadata
         seen_models.append(request.url.path)
         assert "x-goog-api-key" in request.headers
         assert "offline-secret" not in str(request.url)
-        if len(seen_models) == 1 and not november5:
+        if len(seen_models) == 1 and not november5 and not november6:
             return httpx.Response(429, json={"error": {
                 "status": "RESOURCE_EXHAUSTED", "details": [{"violations": [{
                     "quotaId": "GenerateRequestsPerDayPerProjectPerModel-FreeTier",
                 }]}],
             }})
         attempts[url] = attempts.get(url, 0) + 1
+        is_macro = "home.treasury.gov" in url
+        if november6 and is_macro and attempts[url] > 1:
+            if defect == "november6_auth":
+                return httpx.Response(401, json={"error": {"message": "offline-secret"}})
+            if defect == "november6_503":
+                return httpx.Response(503, json={"error": {"status": "UNAVAILABLE"}})
+            if defect == "november6_schema":
+                return httpx.Response(200, json=response_for("invalid JSON"))
         if november5 and "leiphone.com" not in url and "home.treasury.gov" not in url:
             request_index = len(global_requests)
             assert request_index < len(historical["global_http_statuses"])
@@ -108,7 +136,7 @@ def test_full_daily_run_preserves_36_candidates_and_fails_closed(
             return httpx.Response(503, json={"error": {"status": "UNAVAILABLE"}})
         if "leiphone.com" not in url and defect == "global_timeout":
             raise httpx.ReadTimeout("offline failure", request=request)
-        if not november5 and url == timeout_url and (persistent_timeout or attempts[url] == 1):
+        if not november5 and not november6 and url == timeout_url and (persistent_timeout or attempts[url] == 1):
             raise httpx.ReadTimeout("offline-secret must not be logged", request=request)
         is_t2 = "leiphone.com" in url
         if defect == "unexpected" and url == timeout_url:
@@ -118,6 +146,13 @@ def test_full_daily_run_preserves_36_candidates_and_fails_closed(
             sourcing="SECONDHAND_REPORT" if is_t2 else "FIRSTHAND_OFFICIAL",
             original_source="公司公告" if is_t2 else "",
         )
+        if november6 and is_macro:
+            if defect == "november6_low_score":
+                output["importance_score"] = 50
+            elif attempts[url] == 1 or defect == "november6_english":
+                output["risks_and_counterevidence"] = ["Unverified execution risk", "Uncertain timing"]
+            elif defect == "november6_evidence":
+                output["evidence"][0]["quote"] = "invented exact quote must be rejected"
         if november5 and "leiphone.com" not in url and "home.treasury.gov" not in url:
             if len(global_requests) in historical["invalid_language_request_numbers"]:
                 output["headline"] = "English-only headline must remain rejected"
@@ -168,6 +203,45 @@ def test_full_daily_run_preserves_36_candidates_and_fails_closed(
     ops = json.loads((run_dir / "ops.json").read_text())
     events = json.loads((run_dir / "provider-request-events.json").read_text())
     failures = json.loads((run_dir / "analysis-failures.json").read_text())
+    if november6:
+        macro = json.loads((run_dir / "departments/macro/provider-usage.json").read_text())
+        macro_ops = json.loads((run_dir / "departments/macro/ops.json").read_text())
+        repairs = [e for e in events if e.get("reason_code") == "OUTPUT_LANGUAGE_RETRY_SCHEDULED"]
+        assert macro["candidate_attempts"] == macro["validated_outputs"] == 1
+        assert summary["analysis_candidate_count"] == 32
+        assert summary["provider_request_attempts"] <= request_cap
+        assert len(repairs) == (0 if defect in {"november6_no_spare", "november6_low_score"} else 1)
+        if repairs:
+            assert repairs[0]["fields"] == ["risks_and_counterevidence[0]", "risks_and_counterevidence[1]"]
+        assert ops["passed"] is expected_pass
+        if defect == "november6_auth":
+            assert summary["provider_halted"] is True
+            assert summary["unprocessed_candidate_count"] == 31
+            assert failures[0]["error_code"] == "GEMINI_HTTP_401"
+        else:
+            assert summary["provider_halted"] is False
+            assert summary["analyze_attempts"] == summary["provider_validated_outputs"] == 32
+            assert summary["unprocessed_candidate_count"] == 0
+            assert ops["checks"]["china_department_complete"]
+            assert ops["checks"]["global_department_complete"]
+        if expected_pass:
+            assert not failures
+            assert macro["request_count"] == (1 if defect == "november6_low_score" else 2)
+            assert summary["provider_request_attempts"] == (32 if defect == "november6_low_score" else 33)
+            assert ops["checks"]["macro_analysis_language_usable"]
+            assert ops["checks"]["department_delivery_ready"]
+        else:
+            assert macro_ops["status"] == "FAILED"
+            assert not ops["checks"]["department_delivery_ready"]
+            if defect == "november6_english":
+                assert macro["request_count"] == 2  # no third generation
+                assert failures[0]["error_code"] == "OUTPUT_LANGUAGE_INVALID"
+            if defect == "november6_no_spare":
+                assert macro["request_count"] == 1
+            if defect == "november6_evidence":
+                assert failures[0]["error_code"] == "EVIDENCE_MISMATCH"
+        assert "offline-secret" not in json.dumps([events, failures])
+        return
     if november5:
         usage = {desk: json.loads((run_dir / f"departments/{desk}/provider-usage.json").read_text())
                  for desk in ("global", "china", "macro")}
