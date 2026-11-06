@@ -22,8 +22,9 @@ def test_daily_workflow_gates_before_publish_and_delivery():
     history = names.index("Update published source history (URL and content hash only)")
     email = names.index("Email the digest (Gate-checked; sends only if Ops passed)")
     commit = names.index("Commit delivered digest and email ledger")
+    accepted = names.index("Persist accepted delivery ledger")
 
-    assert upload < gate < prepare < history < email < commit
+    assert upload < gate < prepare < email < accepted < history < commit
 
     assert steps[gate]["run"].strip() == "python -m app.scripts.verify_daily_digest_ops"
     assert "git commit" not in steps[prepare]["run"]
@@ -31,7 +32,8 @@ def test_daily_workflow_gates_before_publish_and_delivery():
     assert 'python -m app.scripts.send_digest_email --day "$DIGEST_DAY" --send' in steps[email]["run"]
     assert 'python -m app.scripts.send_digest_email --day "$DIGEST_DAY"\n' in steps[email]["run"]
     assert "||" not in steps[email]["run"]
-    assert "steps.guard.outputs.send_email == 'true'" in steps[commit]["if"]
+    assert "steps.email.outputs.delivery_status == 'SENT'" in steps[commit]["if"]
+    assert "steps.email.outputs.delivery_status == 'SENT'" in steps[history]["if"]
     assert "digests/.source-history.jsonl" in steps[commit]["run"]
     assert "git add" in steps[commit]["run"]
     assert "git push origin main" in steps[commit]["run"]
@@ -166,6 +168,6 @@ def test_scheduled_sender_pins_one_date_and_missing_render_is_fatal():
         assert steps[name]["env"]["DIGEST_DAY"] == "${{ steps.guard.outputs.day }}"
         assert "date +%F" not in steps[name]["run"]
     prepare = steps["Prepare audited digest for delivery"]["run"]
-    missing = prepare.split('if [ -z "$DIGEST" ]; then', 1)[1].split("fi", 1)[0]
+    missing = prepare.split('if [ ! -f "$DIGEST" ]; then', 1)[1].split("fi", 1)[0]
     assert "exit 1" in missing
     assert "exit 0" not in missing

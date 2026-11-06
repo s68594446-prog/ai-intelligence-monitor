@@ -20,6 +20,9 @@ flowchart LR
     P[SMTP configuration preflight]
     L[Existing fail-closed email Gate]
     S[SMTP send]
+    F[Final copy and confirmed-error review]
+    T[Body and audit matched publication threads]
+    W[Independent read-only Watchdog]
 
     D --> C
     D --> G
@@ -28,10 +31,14 @@ flowchart LR
     G -->|immutable handoff| E
     M -->|immutable handoff| E
     E -->|PASS only| R
-    R --> O
+    T --> R
+    R --> F --> O
     P --> O
     O -->|passed| L
     L -->|revalidates SMTP and idempotency| S
+    S -->|SENT ledger then archive| T
+    S -.-> W
+    O -.-> W
 ```
 
 ## Department contract
@@ -149,6 +156,21 @@ after content regeneration. Failure handling attempts to commit only the ledger,
 not a failed digest. Cancellation, runner loss or Git push failure can still lose
 an uncommitted record: this is not an exactly-once delivery guarantee. See the
 [operator runbook](docs/PHASE_3C_RUNBOOK.md).
+
+All sender paths now apply the same day-level `SENT` hold even if body or
+recipients change. Invalid ledgers fail closed and local senders use a file lock.
+Generation, review and archive share one pinned date and explicit run directory.
+SMTP acceptance is committed before the digest/history archive. Only archived
+body and Ops-audit hashes matching a `SENT` ledger row can seed event threads;
+older unhashed archives are not silently backfilled. Unchanged evidence is
+suppressed; status changes without new evidence require review. Confirmed
+corrections are source-bound configuration, never model-promoted findings.
+
+The independent Watchdog uses at most three read-only GitHub API calls per
+inspection, diagnoses workflow stages and ledger/archive state, and emits an
+Actions failure and sanitized artifact. It has no model or SMTP credentials and
+cannot retry or authorize delivery. It distinguishes SMTP acceptance from inbox
+delivery, which it cannot observe.
 
 ## Credential boundary
 

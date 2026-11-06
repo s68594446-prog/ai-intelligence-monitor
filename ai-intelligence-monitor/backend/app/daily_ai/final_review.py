@@ -11,8 +11,9 @@ from html.parser import HTMLParser
 
 from app.daily_ai.money_claims import facts
 from app.daily_ai.article_integrity import source_integrity_issues
+from app.daily_ai.corrections import recurrence_findings, registry_digest
 
-VERSION = "final-review-v2"
+VERSION = "final-review-v3"
 INTERNAL = re.compile(r"(?:raw_text|raw_response|system_instruction|provider-request-events|"
                       r"analysis-failures|Traceback|x-goog-api-key|SMTP_PASSWORD)|"
                       r"(?:ops|provider-usage)\.json", re.I)
@@ -75,6 +76,7 @@ def review_fields(fields: dict[str, str], source_url: str, raw_text: str) -> dic
                 r"(?:每年|年度).{0,8}(?:金额|额度|分配|拨付)|(?:金额|额度|分配).{0,8}(?:每年|年度)", text):
             findings.append({"claim_id": sha(source_url + name + text)[:24], "field": name,
                              "error_type": "DISCLOSURE_NEEDS_REVIEW", "status": "HOLD", "evidence": annual})
+    findings.extend(recurrence_findings(fields, source_url, raw_text))
     return {"claims": claims, "source_facts": source_facts, "findings": findings,
             "passed": not findings}
 
@@ -182,6 +184,7 @@ def review_rendered(*, day: str, body: str, raw_by_url: dict[str, str],
     if values(text) != values(body) or values(visible_text(markup)) != values(body):
         findings.append({"error_type": "RENDERED_NUMBER_MISMATCH", "status": "HOLD"})
     return {"version": VERSION, "day": day, "passed": not findings,
+            "correction_registry_sha256": registry_digest(),
             "body_hashes": body_hashes(body, text, markup), "findings": findings,
             "claims": claims, "source_facts": source_facts,
             "coverage": "monetary-values-periods-status; not general semantic verification"}
@@ -191,12 +194,13 @@ def verify_review_seal(review: dict | None, *, day: str, body: str, text: str, m
     return (isinstance(review, dict) and review.get("version") == VERSION
             and review.get("passed") is True and review.get("findings") == []
             and review.get("day") == day
+            and review.get("correction_registry_sha256") == registry_digest()
             and review.get("body_hashes") == body_hashes(body, text, markup))
 
 
 def review_seal(report: dict) -> dict:
     """Keep full evidence in final-review.json; archive only the delivery seal."""
-    return {**{key: report[key] for key in ("version", "day", "passed", "body_hashes", "coverage")},
+    return {**{key: report[key] for key in ("version", "day", "passed", "body_hashes", "coverage", "correction_registry_sha256")},
             "findings": [{key: value for key, value in finding.items() if key != "evidence"}
                          for finding in report["findings"]],
             "claim_count": len(report["claims"]), "audit_artifact": "final-review.json"}

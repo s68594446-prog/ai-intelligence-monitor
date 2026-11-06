@@ -1,0 +1,30 @@
+[
+  {
+    "claim_id": "nvidia-uk-compute-20261013-total-usd",
+    "error_type": "MONETARY_AMOUNT_MISMATCH",
+    "status": "CONFIRMED",
+    "confirmation_basis": "preserved_source",
+    "confirmed_on": "2026-10-16",
+    "source_url": "https://blogs.nvidia.com/blog/uk-ecosystem-deployment/",
+    "evidence": "NVIDIA is putting that principle into practice, including through a five-year, $250 million compute commitment to strengthen the U.K.’s agentic safety and security research.",
+    "wrong_text": "五亿美元算力承诺",
+    "wrong_amount": "5E+8",
+    "currency": "USD",
+    "resolution": "EXCLUDE_AND_REQUIRE_SOURCE_REVIEW",
+    "corrected_text": "五年期总值2.5亿美元的算力承诺；不据此推断已经支付现金。"
+  },
+  {
+    "claim_id": "ymtc-20261106-cny-unit",
+    "error_type": "MONETARY_UNIT_MISMATCH",
+    "status": "CONFIRMED",
+    "confirmation_basis": "preserved_source",
+    "confirmed_on": "2026-11-06",
+    "source_url": "https://www.digitimes.com/news/a20261106PD227/ymtc-ipo-nand-equipment-manufacturing.html",
+    "evidence": "YMTC's parent company, CCSH Corporation, had planned to raise CNY33 billion (approx. US$4.93 billion) through an IPO on Shanghai's STAR Market to finance production-line upgrades and next-generation memory research...",
+    "wrong_text": "33亿元人民币",
+    "wrong_amount": "3.3E+9",
+    "currency": "CNY",
+    "resolution": "EXCLUDE_AND_REQUIRE_COMPLETE_SOURCE",
+    "corrected_text": "CNY33 billion等于330亿元人民币；该摘录不证明最新IPO进展或实际到账。"
+  }
+]

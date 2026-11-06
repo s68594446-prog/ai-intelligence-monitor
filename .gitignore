@@ -22,3 +22,6 @@ venv/
 .env
 .env.*
 !.env.example
+
+# Local sender synchronization, not a publication record.
+digests/.email-log.jsonl.lock

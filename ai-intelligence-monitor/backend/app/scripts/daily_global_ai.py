@@ -1,7 +1,8 @@
 import argparse
 import hashlib
 import json
-from datetime import datetime, timedelta, timezone
+import os
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
@@ -23,6 +24,7 @@ from app.daily_ai.global_digest import render_global_digest, select_global_diges
 from app.daily_ai.final_review import review_fields, review_rendered, review_seal
 from app.daily_ai.article_integrity import DailyArticleExtractor, source_integrity_issues
 from app.daily_ai.global_ops import narrative_fields
+from app.daily_ai.event_tracking import load_tracking_config, load_published_threads, track_events, review_judgments
 from app.daily_ai.department_harness import (
     CONTENT_DEPARTMENTS,
     DepartmentCandidate,
@@ -256,6 +258,7 @@ def _args():
         help="explicit total Gemini HTTP ceiling including retries; defaults to legacy --max-analyze",
     )
     parser.add_argument("--lookback-hours", type=int, default=48, help="only items published within this window (unknown dates kept)")
+    parser.add_argument("--day", type=date.fromisoformat, help="pin the workflow's report date across midnight")
     args = parser.parse_args()
     if args.max_provider_requests is None:
         args.max_provider_requests = args.max_analyze
@@ -341,7 +344,7 @@ def run():
     args = _args()
     settings = Settings()
     now = datetime.now(timezone.utc)
-    report_day = now.astimezone(ZoneInfo("Asia/Shanghai")).date()
+    report_day = args.day or now.astimezone(ZoneInfo("Asia/Shanghai")).date()
     source_history = load_recent_source_history(
         SOURCE_HISTORY_PATH,
         current_day=report_day,
@@ -349,6 +352,9 @@ def run():
     run_id = now.strftime("%Y%m%dT%H%M%SZ") + "-daily-ai"
     run_dir = settings.runs_dir / run_id
     run_dir.mkdir(parents=True, exist_ok=False)
+    if os.environ.get("GITHUB_OUTPUT"):
+        with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+            output.write(f"run_dir={run_dir.resolve()}\n")
     plan = load_query_plan(QUERY_PLAN_PATH)
     policy = load_source_policy(SOURCE_POLICY_PATH)
     queries = [
@@ -1005,6 +1011,15 @@ def run():
 
     cluster_by_url = {url: clusters.get(candidate_id, candidate_id) for url, candidate_id in analysis_urls.items()}
     digest_items = select_global_digest(analyses, cluster_by_url=cluster_by_url) if args.render else []
+    tracking_config = load_tracking_config()
+    previous_threads, tracking_warnings = load_published_threads(SOURCE_HISTORY_PATH.parent, current_day=report_day)
+    digest_items, event_threads = track_events(
+        digest_items, analyses=analyses, previous=previous_threads, day=report_day,
+        aliases=tracking_config["aliases"],
+    )
+    judgment_reviews = review_judgments(tracking_config["judgments"], today=report_day, raw_by_url=raw_by_url)
+    _write(run_dir / "event-threads.json", {"records": event_threads, "warnings": tracking_warnings})
+    _write(run_dir / "judgment-reviews.json", judgment_reviews)
     editorial_checks = {
         "evidence_handoff_accepted": evidence_status
         in {DepartmentStatus.HEALTHY, DepartmentStatus.HEALTHY_EMPTY},
@@ -1170,6 +1185,7 @@ def run():
     additional_checks.update(
         {
             "final_rendered_review_passed": args.render and final_review["passed"],
+            "event_status_changes_evidenced": not any(r["change"] == "STATUS_REVIEW_REQUIRED" for r in event_threads),
             "evidence_review_complete": evidence_status
             in {DepartmentStatus.HEALTHY, DepartmentStatus.HEALTHY_EMPTY},
             "editorial_complete": editorial_status
@@ -1217,6 +1233,9 @@ def run():
             "audit": {
                 **ops.audit,
                 "final_review": review_seal(final_review),
+                "event_threads": event_threads,
+                "tracking_warnings": tracking_warnings,
+                "judgment_reviews": judgment_reviews,
                 "provider_request_budget": args.max_provider_requests,
                 "provider_request_attempts": provider_request_attempts,
                 "analysis_model": analysis_model_label,
