@@ -438,6 +438,32 @@ class GeminiGlobalAiAnalysisAdapter:
             },
         }
 
+    def _recover_server_failure(self, *, status_code: int, source_url: str) -> bool:
+        """Reuse the bounded server policy for HTTP and mixed timeout paths.
+
+        Call only after transient retries are exhausted, with an actual HTTP
+        status from this candidate's current retry path. A timeout alone is not
+        evidence of a 503 and must not enable the opt-in model transition.
+        """
+        if status_code < 500 or (
+            self.max_provider_requests is not None
+            and self.request_count >= self.max_provider_requests
+        ):
+            return False
+        if self.governor.server_recovery_cooldown(self.rate_limit_cooldown_seconds):
+            self.request_events.append({
+                "source_url": source_url,
+                "model": self.model,
+                "request_number": self.request_count,
+                "reason_code": "GEMINI_SERVER_RECOVERY_SCHEDULED",
+                "cooldown_seconds": round(self.rate_limit_cooldown_seconds, 3),
+            })
+            return True
+        # Recovery is run-wide and single-use. The explicit controller switch
+        # is also single-use; every re-entry still checks all request/deadline
+        # budgets and applies the unchanged output/evidence validation.
+        return self.model_controller.activate_server_fallback(status_code=status_code)
+
     def analyze(
         self,
         *,
@@ -495,6 +521,20 @@ class GeminiGlobalAiAnalysisAdapter:
                 if will_retry:
                     self.governor.sleep(min(2**retry_number, MAX_RETRY_DELAY_SECONDS))
                     continue
+                # Assignment above does not replace `response` when post()
+                # times out. Preserve the last observed HTTP failure in this
+                # retry path so 503 -> 503 -> timeout gets the same bounded
+                # recovery/fallback policy as an all-503 outage.
+                if (
+                    retry_number >= self.max_retries
+                    and response is not None
+                    and self._recover_server_failure(
+                        status_code=response.status_code, source_url=source_url
+                    )
+                ):
+                    return self.analyze(
+                        metadata=metadata, raw_text=raw_text, source_url=source_url
+                    )
                 raise ProviderCallError(
                     "Gemini analysis timed out",
                     diagnostics={
@@ -575,48 +615,13 @@ class GeminiGlobalAiAnalysisAdapter:
                         source_url=source_url,
                     )
             if (
-                response.status_code >= 500
-                and retry_number >= self.max_retries
-                and budget_remaining
-                and self.governor.server_recovery_cooldown(
-                    self.rate_limit_cooldown_seconds
+                retry_number >= self.max_retries
+                and self._recover_server_failure(
+                    status_code=response.status_code, source_url=source_url
                 )
             ):
-                self.request_events.append({
-                    "source_url": source_url,
-                    "model": request_model,
-                    "request_number": self.request_count,
-                    "reason_code": "GEMINI_SERVER_RECOVERY_SCHEDULED",
-                    "cooldown_seconds": round(
-                        self.rate_limit_cooldown_seconds, 3
-                    ),
-                })
-                # A short Gemini outage can span all per-candidate retries. One
-                # shared recovery pause gives the run a chance to resume without
-                # creating an unbounded retry loop or weakening downstream Ops.
                 return self.analyze(
-                    metadata=metadata,
-                    raw_text=raw_text,
-                    source_url=source_url,
-                )
-            if (
-                response.status_code == 503
-                and retry_number >= self.max_retries
-                and budget_remaining
-                and self.governor.server_recovery_used
-                and self.model_controller.activate_server_fallback(
-                    status_code=response.status_code
-                )
-            ):
-                self._sync_model()
-                # The primary model remained unavailable after normal retries
-                # and the one shared recovery pause. The explicitly enabled
-                # lower Gemini model gets one attempt path; the controller,
-                # request budget, and run deadline keep this transition bounded.
-                return self.analyze(
-                    metadata=metadata,
-                    raw_text=raw_text,
-                    source_url=source_url,
+                    metadata=metadata, raw_text=raw_text, source_url=source_url
                 )
             if (
                 response.status_code == 200
