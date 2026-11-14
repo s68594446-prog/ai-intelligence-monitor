@@ -809,3 +809,116 @@ def test_per_minute_quota_never_triggers_model_fallback():
 
     assert controller.active_model == "gemini-3.5-flash"
     assert controller.transitions == []
+
+
+@pytest.mark.parametrize("recovery_used", [False, True])
+def test_mixed_503_timeout_uses_bounded_recovery_and_explicit_fallback(recovery_used):
+    statuses = ([503, 503, "timeout"] * (1 if recovery_used else 2)) + [200]
+    seen_models = []
+    sleeps = []
+
+    def handler(request):
+        seen_models.append(request.url.path)
+        status = statuses.pop(0)
+        if status == "timeout":
+            raise httpx.ReadTimeout(API_KEY, request=request)
+        return httpx.Response(status, json=response_for(valid_output()) if status == 200 else {})
+
+    controller = GeminiModelController(
+        primary_model="gemini-3.5-flash", fallback_model="gemini-3.5-flash-lite",
+        server_fallback_enabled=True,
+    )
+    analyzer = adapter(handler, max_retries=2, max_provider_requests=15,
+                       model_controller=controller, sleep_fn=sleeps.append)
+    analyzer.governor.server_recovery_used = recovery_used
+    result = analyzer.analyze(metadata={}, raw_text=RAW_TEXT, source_url=SOURCE_URL)
+    assert isinstance(result, GlobalAiAnalysisContract)
+    assert not statuses
+    assert len(seen_models) == (4 if recovery_used else 7)
+    assert all(path.endswith("/gemini-3.5-flash:generateContent") for path in seen_models[:-1])
+    assert seen_models[-1].endswith("/gemini-3.5-flash-lite:generateContent")
+    assert len(controller.transitions) == 1
+    assert controller.transitions[0]["status_code"] == "503"
+    assert sleeps.count(60) == (0 if recovery_used else 1)
+    assert_no_key(analyzer.request_events)
+    assert_no_key(controller.transitions)
+
+
+@pytest.mark.parametrize("status,enabled", [(503, False), (500, True), (None, True)])
+def test_timeout_does_not_invent_503_or_override_fallback_opt_in(status, enabled):
+    calls = []
+    def handler(request):
+        calls.append(request.url.path)
+        if status is not None and len(calls) <= 2:
+            return httpx.Response(status, json={})
+        raise httpx.ReadTimeout(API_KEY, request=request)
+
+    controller = GeminiModelController(
+        primary_model="gemini-3.5-flash", fallback_model="gemini-3.5-flash-lite",
+        server_fallback_enabled=enabled,
+    )
+    analyzer = adapter(handler, max_retries=2, model_controller=controller)
+    analyzer.governor.server_recovery_used = True
+    with pytest.raises(ProviderCallError) as caught:
+        analyzer.analyze(metadata={}, raw_text=RAW_TEXT, source_url=SOURCE_URL)
+    assert caught.value.diagnostics["reason_code"] == "GEMINI_TIMEOUT"
+    assert len(calls) == 3
+    assert not controller.transitions
+    assert_no_key(caught.value.diagnostics)
+
+
+@pytest.mark.parametrize("limit", ["department", "global", "deadline"])
+def test_mixed_503_timeout_recovery_obeys_remaining_budgets(limit):
+    statuses = [503, 503, "timeout"]
+    now = [0.0]
+    def sleep(seconds):
+        now[0] += seconds
+    def handler(request):
+        status = statuses.pop(0)
+        if status == "timeout":
+            raise httpx.ReadTimeout(API_KEY, request=request)
+        return httpx.Response(status, json={})
+
+    governor = GeminiRequestGovernor(
+        minimum_interval_seconds=0, max_run_seconds=4 if limit == "deadline" else 1000,
+        max_provider_requests=3 if limit == "global" else None,
+        sleep_fn=sleep, monotonic_fn=lambda: now[0],
+    )
+    controller = GeminiModelController(
+        primary_model="gemini-3.5-flash", fallback_model="gemini-3.5-flash-lite",
+        server_fallback_enabled=True,
+    )
+    analyzer = adapter(handler, max_retries=2, governor=governor,
+                       max_provider_requests=3 if limit == "department" else 15,
+                       model_controller=controller)
+    with pytest.raises(ProviderCallError) as caught:
+        analyzer.analyze(metadata={}, raw_text=RAW_TEXT, source_url=SOURCE_URL)
+    assert analyzer.request_count == governor.request_count == 3
+    expected = {"department": "GEMINI_TIMEOUT", "global": "GEMINI_GLOBAL_BUDGET_EXHAUSTED",
+                "deadline": "GEMINI_RUN_DEADLINE_EXCEEDED"}
+    assert caught.value.diagnostics["reason_code"] == expected[limit]
+    assert not controller.transitions
+
+
+@pytest.mark.parametrize("final", ["timeout", "bad_evidence"])
+def test_mixed_timeout_fallback_is_single_use_and_output_is_still_validated(final):
+    statuses = [503, 503, "timeout"] * (2 if final == "timeout" else 1)
+    if final == "bad_evidence":
+        statuses.append(200)
+    def handler(request):
+        status = statuses.pop(0)
+        if status == "timeout":
+            raise httpx.ReadTimeout(API_KEY, request=request)
+        output = valid_output(evidence=[{"quote": "not in source", "source_url": SOURCE_URL}])
+        return httpx.Response(status, json=response_for(output) if status == 200 else {})
+
+    controller = GeminiModelController(
+        primary_model="gemini-3.5-flash", fallback_model="gemini-3.5-flash-lite",
+        server_fallback_enabled=True,
+    )
+    analyzer = adapter(handler, max_retries=2, max_provider_requests=15, model_controller=controller)
+    analyzer.governor.server_recovery_used = True
+    with pytest.raises(ProviderCallError if final == "timeout" else EvidenceMismatch):
+        analyzer.analyze(metadata={}, raw_text=RAW_TEXT, source_url=SOURCE_URL)
+    assert not statuses
+    assert len(controller.transitions) == 1
