@@ -284,16 +284,28 @@ def _source_label(url: str) -> str:
         return url
 
 
+# Local typefaces only. Mail clients without a Chinese serif use their installed fallback.
+EDITORIAL_SERIF = "Georgia,'Songti SC','Noto Serif CJK SC',SimSun,serif"
+
+
 def _detail_row(label: str, value: str, *, caution: bool = False) -> str:
-    decoration = "background-color:#f5f7f9;border-left:3px solid #a8bac7;padding:12px 14px;" if caution else ""
-    return (
-        '<tr><td style="padding:0 22px 16px 22px">'
-        f'<div style="{decoration}">'
-        f'<div style="font-size:11px;line-height:16px;letter-spacing:.08em;'
-        f'color:#375d78;font-weight:700;margin:0 0 5px 0">{html.escape(label)}</div>'
-        f'<div style="font-size:15px;line-height:25px;color:#2c3843;margin:0">'
-        f'{html.escape(value or "未明确列出")}</div></div></td></tr>'
-    )
+    content = html.escape(value or "未明确列出")
+    label_style = "font-size:12px;line-height:18px;font-weight:bold;color:#405967;letter-spacing:.06em"
+    if caution:
+        return f"""
+        <tr><td style="padding:0 0 16px">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+            <tr><td bgcolor="#eff3f5" style="padding:12px 15px;border-left:2px solid #7e929e">
+              <div style="{label_style}">{html.escape(label)}</div>
+              <p style="margin:5px 0 0;font-size:15px;line-height:25px;color:#394954">{content}</p>
+            </td></tr>
+          </table>
+        </td></tr>"""
+    return f"""
+        <tr><td style="padding:0 0 18px">
+          <div style="{label_style}">{html.escape(label)}</div>
+          <p style="margin:5px 0 0;font-size:16px;line-height:27px;color:#243746">{content}</p>
+        </td></tr>"""
 
 
 def importance_stars(score: int) -> int:
@@ -327,44 +339,32 @@ def _render_card(item: EmailDigestItem) -> str:
             for url in item.other_sources
         )
     else:
-        supplemental = '<span style="color:#94a3b8">无</span>'
+        supplemental = '<span style="color:#5e6e79">无</span>'
     status = (
-        '<tr><td style="padding-top:10px">'
-        '<span style="display:inline-block;padding:4px 9px;border:1px solid #c6d4de;'
-        'background-color:#edf2f6;color:#375d78;font-size:12px;line-height:18px;border-radius:4px">'
-        f'事实状态：{html.escape(item.fact_status)}</span></td></tr>'
+        '<span style="display:inline-block;margin:2px 0;padding:2px 9px;background-color:#edf2f4;'
+        'font-size:12px;line-height:18px;color:#405967">'
+        f'事实状态：{html.escape(item.fact_status)}</span>'
     ) if item.fact_status else ""
 
-    return (
-        '<table class="digest-card" role="presentation" width="100%" cellpadding="0" cellspacing="0" '
-        'border="0" style="width:100%;border:1px solid #dce3e9;border-collapse:separate;'
-        'border-spacing:0;background-color:#ffffff;border-radius:8px;margin:0 0 14px 0">'
-        '<tr><td style="padding:19px 22px 15px 18px;border-left:4px solid #4c718b">'
-        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" '
-        'style="width:100%;border-collapse:collapse"><tr>'
-        f'<td style="font-size:17px;line-height:25px;color:#243746;font-weight:700;vertical-align:top">{html.escape(item.headline)}</td>'
-        '</tr><tr><td style="padding-top:7px;white-space:nowrap">'
-        f'<span style="color:#d9972b;font-size:14px;letter-spacing:0">{"★" * stars}</span>'
-        f'<span style="color:#cbd5df;font-size:14px;letter-spacing:0">{"☆" * (5 - stars)}</span>'
-        f'<span style="padding-left:8px;font-size:11px;line-height:16px;color:#64727e">{score_label}</span>'
-        '</td></tr>' + status + '</table></td></tr>'
-        + _detail_row("发生了什么", item.what_happened)
-        + _detail_row("产业链解读", item.analysis)
-        + _detail_row("涉及公司与传导路径", item.companies_and_path)
-        + _detail_row("风险与不确定性", item.risks_and_uncertainties, caution=True)
-        + '<tr><td style="padding:0 22px 20px 22px">'
-        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
-        'border="0" style="width:100%;background-color:#f3f6f8;border-collapse:collapse">'
-        '<tr><td style="padding:12px 14px;border-bottom:1px solid #dce3e9">'
-        '<div style="font-size:11px;line-height:16px;letter-spacing:.08em;color:#375d78;'
-        'font-weight:700;margin-bottom:5px">原始来源</div>'
-        f'<div style="font-size:12px;line-height:19px">{source}</div></td></tr>'
-        '<tr><td style="padding:12px 14px">'
-        '<div style="font-size:11px;line-height:16px;letter-spacing:.08em;color:#375d78;'
-        'font-weight:700;margin-bottom:5px">补充来源</div>'
-        f'<div style="font-size:12px;line-height:19px">{supplemental}</div></td></tr>'
-        '</table></td></tr></table>'
-    )
+    return f"""
+      <table class="digest-card" role="presentation" width="100%" cellpadding="0" cellspacing="0"
+             style="width:100%;table-layout:fixed;border-collapse:collapse;word-wrap:break-word">
+        <tr><td style="padding:16px 0 12px">
+          <h3 style="margin:0;font-family:{EDITORIAL_SERIF};font-size:27px;line-height:36px;color:#172e3d;font-weight:bold;text-wrap:balance">{html.escape(item.headline)}</h3>
+        </td></tr>
+        <tr><td style="padding:0 0 18px;line-height:24px">
+          <span style="display:inline-block;margin:0 12px 2px 0;white-space:nowrap"><span style="font-size:15px;color:#98652c">{"★" * stars}</span><span style="font-size:15px;color:#8a979e">{"☆" * (5 - stars)}</span>
+          <span style="font-size:12px;color:#526370">{score_label}</span></span>{status}
+        </td></tr>
+        {_detail_row("发生了什么", item.what_happened)}
+        {_detail_row("产业链解读", item.analysis)}
+        {_detail_row("涉及公司与传导路径", item.companies_and_path)}
+        {_detail_row("风险与不确定性", item.risks_and_uncertainties, caution=True)}
+        <tr><td style="padding:0 0 20px;border-bottom:1px solid #d1dadf;color:#526370;font-size:13px;line-height:22px">
+          <div><strong>原始来源</strong>&nbsp; {source}</div>
+          <div><strong>补充来源</strong>&nbsp; {supplemental}</div>
+        </td></tr>
+      </table>"""
 
 
 def render_bodies(day: str, body: str) -> tuple[str, str]:
@@ -382,74 +382,69 @@ def render_bodies(day: str, body: str) -> tuple[str, str]:
     model_label = metadata_match.group(1).strip() if metadata_match else "模型信息未记录"
     prompt_label = metadata_match.group(2).strip() if metadata_match else "Prompt 未记录"
     runtime_label = f"分析模型 {model_label} · {prompt_label}"
-    model_accent = "border-left:3px solid #e0b774;" if " → " in model_label else ""
+    runtime_accent = "border-left:2px solid #98652c;padding-left:8px;" if " → " in model_label else ""
     section_html = []
     for section in sections:
         cards = "".join(_render_card(item) for item in section.items)
-        section_html.append(
-            '<tr><td style="padding:8px 24px 2px 24px">'
-            '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
-            'border="0" style="width:100%;border-collapse:collapse">'
-            '<tr><td style="padding:10px 0 12px 0;border-bottom:2px solid #a8bac7">'
-            f'<span style="font-size:18px;line-height:26px;color:#2f4d63;font-weight:700">'
-            f'{html.escape(section.label)}</span>'
-            f'<span style="font-size:12px;color:#64727e;margin-left:8px">'
-            f'{len(section.items)} 条</span></td></tr>'
-            f'<tr><td style="padding:14px 0 4px 0">{cards}</td></tr>'
-            '</table></td></tr>'
-        )
+        section_html.append(f"""
+          <tr><td style="padding:24px 5% 0">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse">
+              <tr>
+                <td style="white-space:nowrap;padding-right:12px">
+                  <h2 style="margin:0;font-size:15px;line-height:23px;letter-spacing:.06em;color:#334e60">{html.escape(section.label)}</h2>
+                </td>
+                <td width="100%" style="width:100%"><div style="border-top:1px solid #98a9b4;font-size:1px;line-height:1px">&nbsp;</div></td>
+                <td style="white-space:nowrap;padding-left:12px;font-size:12px;color:#5e6e79">{len(section.items)} 条</td>
+              </tr>
+            </table>
+            {cards}
+          </td></tr>""")
     if not section_html:
         section_html.append(
-            '<tr><td style="padding:34px 28px;text-align:center;font-size:15px;'
-            'line-height:24px;color:#52667a">今日无达到标准的产业链重点新闻</td></tr>'
+            '<tr><td style="padding:34px 20px;text-align:center;font-size:16px;'
+            'line-height:26px;color:#405967">今日无达到标准的产业链重点新闻</td></tr>'
         )
-    html_body = (
-        '<!doctype html><html><head><meta charset="utf-8">'
-        '<meta name="viewport" content="width=device-width, initial-scale=1"></head>'
-        '<body style="margin:0;padding:0;background-color:#eef1f4;'
-        'font-family:Arial,Helvetica,sans-serif;color:#2c3843">'
-        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
-        'border="0" style="width:100%;background-color:#eef1f4;border-collapse:collapse">'
-        '<tr><td align="center" style="padding:22px 10px">'
-        '<table role="presentation" width="660" cellpadding="0" cellspacing="0" '
-        'border="0" style="width:100%;max-width:660px;background-color:#ffffff;'
-        'border-collapse:collapse;border-radius:10px;overflow:hidden">'
-        '<tr><td style="padding:26px 24px 24px 24px;background-color:#243746;'
-        'border-top:5px solid #607d91">'
-        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" '
-        'style="width:100%;border-collapse:collapse"><tr><td style="vertical-align:top">'
-        '<div style="font-size:12px;line-height:18px;letter-spacing:.14em;'
-        'color:#c9d5de;font-weight:700;margin-bottom:8px">AI SUPPLY CHAIN INTELLIGENCE</div>'
-        '<div style="font-size:28px;line-height:36px;color:#ffffff;font-weight:700">'
-        'AI 产业链日报</div>'
-        '<div style="font-size:13px;line-height:20px;color:#dbe4ea;margin-top:4px">'
-        '每日产业链关键变化与证据摘要</div>'
-        f'<div style="font-size:14px;line-height:22px;color:#dbe4ea;margin-top:8px">{html.escape(day)}</div>'
-        '<div style="margin-top:14px;padding:9px 12px;background-color:#1b2c39;border:1px solid #536d80;'
-        f'{model_accent}font-size:12px;line-height:18px;color:#ffffff;border-radius:4px;word-break:break-word">'
-        f'{html.escape(runtime_label)}</div></td></tr></table></td></tr>'
-        '<tr><td style="padding:18px 24px 10px 24px;background-color:#f5f7f9">'
-        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
-        'border="0" style="width:100%;border-collapse:collapse">'
-        '<tr><td style="width:33.33%;padding:10px 6px;border-right:1px solid #dce3e9">'
-        '<div style="font-size:11px;color:#64727e;letter-spacing:.08em">新闻条数</div>'
-        f'<div style="font-size:23px;line-height:30px;color:#2f4d63;font-weight:700">'
-        f'{item_count} <span style="font-size:13px;font-weight:400">条</span></div></td>'
-        '<td style="width:33.33%;padding:10px 6px;border-right:1px solid #dce3e9">'
-        '<div style="font-size:11px;color:#64727e;letter-spacing:.08em">覆盖产业链环节</div>'
-        f'<div style="font-size:23px;line-height:30px;color:#2f4d63;font-weight:700">{section_count} '
-        '<span style="font-size:13px;font-weight:400">个</span></div></td>'
-        '<td style="width:33.33%;padding:10px 6px">'
-        '<div style="font-size:11px;color:#64727e;letter-spacing:.08em">最高重要程度</div>'
-        f'<div style="font-size:14px;line-height:30px;color:#d9972b;font-weight:700">{"★" * highest_stars}'
-        f'<span style="font-size:12px;color:#64727e;font-weight:400"> {highest_stars}/5</span></div></td>'
-        '</tr></table></td></tr>'
-        + "".join(section_html)
-        + '<tr><td style="padding:22px 28px;background-color:#edf2f6;border-top:1px solid #dce3e9;'
-        'font-size:12px;line-height:20px;color:#64727e;text-align:center">'
-        '内容仅用于产业研究与信息整理，不构成任何投资建议。'
-        '</td></tr></table></td></tr></table></body></html>'
-    )
+    metric_style = f"font-family:{EDITORIAL_SERIF};font-size:26px;line-height:31px;color:#243746"
+    unit_style = "font:13px Arial,sans-serif;color:#526370"
+    html_body = f"""<!doctype html>
+    <html lang="zh-CN"><head><meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1"></head>
+    <body style="margin:0;padding:0;background-color:#eef1f4;color:#243746;font-family:Arial,'PingFang SC','Microsoft YaHei',sans-serif">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#eef1f4">
+        <tr><td align="center" style="padding:14px 6px">
+          <!--[if mso]><table role="presentation" width="660" cellpadding="0" cellspacing="0"><tr><td><![endif]-->
+          <table role="presentation" width="660" cellpadding="0" cellspacing="0" bgcolor="#ffffff"
+                 style="width:100%;max-width:660px;table-layout:fixed;border-collapse:collapse;text-align:left">
+            <tr><td bgcolor="#243746" style="padding:10px 4%;background-color:#243746">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+                <td style="font-size:10px;line-height:15px;font-weight:bold;letter-spacing:.12em;color:#ffffff">AI SUPPLY CHAIN INTELLIGENCE</td>
+                <td align="right" style="padding-left:8px;white-space:nowrap;font:12px 'Courier New',monospace;color:#e2e9ec">{html.escape(day)}</td>
+              </tr></table>
+            </td></tr>
+            <tr><td align="center" style="padding:24px 5% 19px">
+              <h1 style="margin:0;font-family:{EDITORIAL_SERIF};font-size:40px;line-height:52px;font-weight:bold;color:#172e3d;letter-spacing:.02em">AI 产业链日报</h1>
+              <p style="margin:4px 0 0;font-size:13px;line-height:21px;letter-spacing:.06em;color:#526370">每日产业链关键变化与证据摘要</p>
+            </td></tr>
+            <tr><td style="padding:0 5%">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+                     style="width:100%;table-layout:fixed;border-top:3px double #41596a;border-bottom:1px solid #b8c5cd;text-align:center">
+                <tr style="font-size:12px;line-height:18px;color:#526370">
+                  <td style="padding:9px 2px"><div style="{metric_style}">{item_count} <span style="{unit_style}">条</span></div>新闻条数</td>
+                  <td style="padding:9px 2px"><div style="{metric_style}">{section_count} <span style="{unit_style}">个</span></div>覆盖产业链环节</td>
+                  <td style="padding:9px 2px"><div style="{metric_style}">{highest_stars}/5</div>最高重要程度</td>
+                </tr>
+              </table>
+              <div style="margin-top:8px;{runtime_accent}font-size:12px;line-height:18px;color:#536775;word-wrap:break-word;text-wrap:balance">{html.escape(runtime_label)}</div>
+            </td></tr>
+            {"".join(section_html)}
+            <tr><td style="padding:20px 5%;font-size:12px;line-height:20px;color:#536775;text-align:center">
+              内容仅用于产业研究与信息整理，不构成任何投资建议。
+            </td></tr>
+          </table>
+          <!--[if mso]></td></tr></table><![endif]-->
+        </td></tr>
+      </table>
+    </body></html>"""
     return text_body, html_body
 
 
