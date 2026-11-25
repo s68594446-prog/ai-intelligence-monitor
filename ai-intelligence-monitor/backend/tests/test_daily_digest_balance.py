@@ -1,9 +1,12 @@
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 import yaml
 
 from app.daily_ai.dedup import cluster_texts
+from app.daily_ai.email_digest import render_bodies
+from app.daily_ai.final_review import review_rendered
 from app.daily_ai.global_contracts import GlobalAiAnalysisContract
 from app.daily_ai.global_digest import render_global_digest, select_global_digest
 from app.daily_ai.gemini_analysis import GeminiGlobalAiAnalysisAdapter
@@ -59,6 +62,20 @@ def test_text_digest_carries_runtime_model_and_prompt_metadata():
     )
 
     assert "分析元数据：Gemini 3.5 Flash · Prompt v9" in rendered
+
+
+@pytest.mark.parametrize("status,label", [
+    ("DELIVERED", "已有实际进展"), ("ANNOUNCED_ONLY", "仅公告／计划"), ("UNKNOWN", "待确认"),
+])
+def test_approved_item_status_survives_render_and_review(status, label):
+    item, = select_global_digest([analysis(announced=status)])
+    markdown = render_global_digest([item], analysis_model="gemini-3.5-flash", prompt_version="v9")
+    day = "2026-11-25"
+    for surface in (markdown, *render_bodies(day, markdown)):
+        assert surface.count(f"事实状态：{label}") == 1
+    review = review_rendered(day=day, body=markdown, raw_by_url={item["url"]: "公司宣布建设新的数据中心。"},
+                             expected_status_by_url={item["url"]: status})
+    assert review["findings"] == []
 
 
 def test_text_digest_discloses_quota_fallback_model_chain():

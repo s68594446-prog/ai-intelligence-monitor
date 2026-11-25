@@ -30,6 +30,11 @@ SECTOR_ORDER = [
     ("MACRO_POLICY", "宏观政策"),
 ]
 SECTOR_LABELS = dict(SECTOR_ORDER)
+FACT_STATUS_LABELS = {
+    "DELIVERED": "已有实际进展",
+    "ANNOUNCED_ONLY": "仅公告／计划",
+    "UNKNOWN": "待确认",
+}
 
 
 def _richness(item: GlobalAiAnalysisContract) -> tuple:
@@ -145,9 +150,14 @@ def _render_item(item: dict) -> str:
     blocks = [
         f"【{item['headline']}】",
         f"重要程度：{int(item.get('importance_score', 0))}/100",
+    ]
+    status = FACT_STATUS_LABELS.get(item.get("announced_vs_delivered"))
+    if status:
+        blocks.append(f"事实状态：{status}")
+    blocks.extend([
         item["what_happened"] + ("\n" + item["thread_note"] if item.get("thread_note") else ""),
         f"💡 分析：{item['analysis']}",
-    ]
+    ])
     chain = _render_chain(item)
     if chain:
         blocks.append(chain)

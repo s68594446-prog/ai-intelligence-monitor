@@ -86,10 +86,30 @@ class _VisibleText(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.parts = []
         self.links = []
+        self.card_depth = 0
+        self.card_statuses = Counter()
 
     def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if tag == "table":
+            if self.card_depth:
+                self.card_depth += 1
+            elif "digest-card" in attrs.get("class", "").split():
+                self.card_depth = 1
+                self.card_start = len(self.parts)
+                self.link_start = len(self.links)
         if tag == "a":
-            self.links.append(dict(attrs).get("href", ""))
+            self.links.append(attrs.get("href", ""))
+
+    def handle_endtag(self, tag):
+        if tag == "table" and self.card_depth:
+            self.card_depth -= 1
+            if self.card_depth == 0:
+                # The first link in a card is its primary source.
+                links = self.links[self.link_start:]
+                for part in self.parts[self.card_start:]:
+                    if part.startswith("事实状态："):
+                        self.card_statuses[(links[0] if links else "", part)] += 1
 
     def handle_data(self, data):
         self.parts.append(data)
@@ -118,7 +138,7 @@ def unrendered_lines(body: str, items: list) -> list[str]:
     """
     from app.daily_ai.email_digest import SECTION_RE, IMPORTANCE_RE, METADATA_RE
     displayed = [getattr(item, name) for item in items for name in
-                 ("headline", "what_happened", "analysis", "companies_and_path", "risks_and_uncertainties", "source_note")]
+                 ("headline", "what_happened", "analysis", "companies_and_path", "risks_and_uncertainties", "source_note", "fact_status")]
     leftovers = []
     for line in (line.strip() for line in body.splitlines() if line.strip()):
         if line in {"AI产业链每日重点", "───", "今日无达到标准的产业链重点新闻"} or SECTION_RE.fullmatch(line) or IMPORTANCE_RE.fullmatch(line) or METADATA_RE.fullmatch(line):
@@ -129,7 +149,7 @@ def unrendered_lines(body: str, items: list) -> list[str]:
             expected += ["、".join(item.other_sources) for item in items]
             if line.split("：", 1)[1].strip() in expected:
                 continue
-        value = re.sub(r"^(?:💡 分析：|📍 涉及：|⚠️ 风险与不确定性：)", "", line).strip()
+        value = re.sub(r"^(?:💡 分析：|📍 涉及：|⚠️ 风险与不确定性：|事实状态：)", "", line).strip()
         if value.startswith("【") and value.endswith("】"):
             value = value[1:-1]
         if not any(value in field for field in displayed):
@@ -138,12 +158,23 @@ def unrendered_lines(body: str, items: list) -> list[str]:
 
 
 def review_rendered(*, day: str, body: str, raw_by_url: dict[str, str],
-                    expected_urls: set[str] | None = None) -> dict:
+                    expected_urls: set[str] | None = None,
+                    expected_status_by_url: dict[str, str] | None = None) -> dict:
     # Local import avoids a renderer/reviewer module cycle.
     from app.daily_ai.email_digest import parse_digest_sections, render_bodies
+    from app.daily_ai.global_digest import FACT_STATUS_LABELS
     text, markup = render_bodies(day, body)
+    parser = _VisibleText()
+    parser.feed(markup)
+    visible = " ".join(parser.parts)
     findings, claims, source_facts = [], [], []
     items = [i for s in parse_digest_sections(body) for i in s.items]
+    statuses = Counter((i.source_url, f"事实状态：{i.fact_status}") for i in items if i.fact_status)
+    status_lines = [line.strip() for line in body.splitlines() if line.strip().startswith("事实状态：")]
+    if len(status_lines) != statuses.total() or statuses != parser.card_statuses:
+        findings.append({"error_type": "RENDERED_FACT_STATUS_MISMATCH", "status": "HOLD"})
+    if body.strip() and text.strip() != body.strip():
+        findings.append({"error_type": "PLAIN_TEXT_CONTENT_MISMATCH", "status": "HOLD"})
     if not items and body.strip() and "今日无达到标准的产业链重点新闻" not in body:
         findings.append({"error_type": "UNPARSED_READER_BODY", "status": "HOLD"})
     if unrendered_lines(body, items):
@@ -152,10 +183,17 @@ def review_rendered(*, day: str, body: str, raw_by_url: dict[str, str],
     if expected_urls is not None and (urls != expected_urls or len(items) != len(expected_urls)):
         findings.append({"error_type": "RENDERED_ITEMS_MISMATCH", "status": "HOLD"})
     for item in items:
+        invalid_status = bool(item.fact_status) and item.fact_status not in FACT_STATUS_LABELS.values()
+        if expected_status_by_url is not None:
+            expected_label = FACT_STATUS_LABELS.get(expected_status_by_url.get(item.source_url))
+            invalid_status = invalid_status or item.fact_status != expected_label
+        if invalid_status:
+            findings.append({"error_type": "RENDERED_FACT_STATUS_MISMATCH", "status": "HOLD",
+                             "source_url": item.source_url})
         if not item.headline or not item.what_happened or not item.analysis or not item.source_url:
             findings.append({"error_type": "INCOMPLETE_READER_ITEM", "status": "HOLD"})
         fields = {name: getattr(item, name) for name in
-                  ("headline", "what_happened", "analysis", "companies_and_path", "risks_and_uncertainties", "source_note")}
+                  ("headline", "what_happened", "analysis", "companies_and_path", "risks_and_uncertainties", "source_note", "fact_status")}
         if item.source_url not in raw_by_url:
             findings.append({"error_type": "SOURCE_SNAPSHOT_MISSING", "status": "HOLD",
                              "source_url": item.source_url})
@@ -163,7 +201,6 @@ def review_rendered(*, day: str, body: str, raw_by_url: dict[str, str],
         claims.extend(review["claims"])
         source_facts.extend(review["source_facts"])
         findings.extend(review["findings"])
-        visible = visible_text(markup)
         for name, value in fields.items():
             if value and value not in visible:
                 findings.append({"error_type": "HTML_CONTENT_MISMATCH", "field": name, "status": "HOLD"})
@@ -171,8 +208,6 @@ def review_rendered(*, day: str, body: str, raw_by_url: dict[str, str],
         if leak_findings(value):
             findings.append({"error_type": "INTERNAL_FIELD_LEAK", "surface": name,
                              "status": "HOLD", "tokens": leak_findings(value)})
-    parser = _VisibleText()
-    parser.feed(markup)
     expected_links = Counter(url for item in items for url in (item.source_url, *item.other_sources) if url)
     if Counter(parser.links) != expected_links:
         findings.append({"error_type": "RENDERED_LINK_MISMATCH", "status": "HOLD"})
@@ -181,7 +216,7 @@ def review_rendered(*, day: str, body: str, raw_by_url: dict[str, str],
     parsed_values = Counter((f["amount"], f["currency"]) for f in claims)
     if values(body) != parsed_values:
         findings.append({"error_type": "UNREVIEWED_RENDERED_NUMBER", "status": "HOLD"})
-    if values(text) != values(body) or values(visible_text(markup)) != values(body):
+    if values(text) != values(body) or values(visible) != values(body):
         findings.append({"error_type": "RENDERED_NUMBER_MISMATCH", "status": "HOLD"})
     return {"version": VERSION, "day": day, "passed": not findings,
             "correction_registry_sha256": registry_digest(),
