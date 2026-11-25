@@ -1,5 +1,6 @@
 import json
 import re
+from html import unescape
 
 import pytest
 from pydantic import SecretStr
@@ -97,6 +98,18 @@ def test_mobile_layout_keeps_model_and_full_source_targets_without_wide_columns(
     assert ">example.com</a>" in html
     assert ">other.example.com</a>" in html
     assert 'href="https://example.com/source-1?a=1&amp;b=2"' in html
+
+
+@pytest.mark.parametrize("body", [sample_digest(), "今日无达到标准的产业链重点新闻"])
+def test_email_heading_navigation_matches_the_published_order(body):
+    text, html = render_bodies("2026-11-25", body)
+    expected = [("1", "AI 产业链日报")]
+    for section in parse_digest_sections(body):
+        expected.append(("2", section.label))
+        expected.extend(("3", item.headline) for item in section.items)
+    headings = re.findall(r"<h([123])\b[^>]*>(.*?)</h\1>", html, re.S)
+    assert [(level, unescape(title)) for level, title in headings] == expected
+    assert text == body
 
 
 def test_email_html_escapes_content_and_makes_sources_clickable():
