@@ -554,6 +554,7 @@ def run():
     }
     department_halted = {department: False for department in CONTENT_DEPARTMENTS}
     department_language_recovery_used = {department: False for department in CONTENT_DEPARTMENTS}
+    department_model_transitions = {department: [] for department in CONTENT_DEPARTMENTS}
     model_controller = GeminiModelController(
         primary_model=settings.gemini_analysis_model,
         fallback_model=settings.gemini_fallback_model,
@@ -719,6 +720,7 @@ def run():
                         department_halted[active_department] = True
                         continue
                     candidate_provider_validated = False
+                    transition_start = len(model_controller.transitions)
                     try:
                         analysis = active_analyzer.analyze(
                             metadata={
@@ -842,6 +844,10 @@ def run():
                         analysis_failures.append({"url": candidate.canonical_url, "error_code": type(exc).__name__})
                     except Exception as exc:  # absolute fail-soft guard
                         analysis_failures.append({"url": candidate.canonical_url, "error_code": f"UNEXPECTED_{type(exc).__name__}"})
+                    finally:
+                        department_model_transitions[active_department].extend(
+                            model_controller.transitions[transition_start:]
+                        )
         finally:
             provider_request_attempts = sum(
                 item.request_count
@@ -930,7 +936,7 @@ def run():
             candidate_attempts=department_attempts[department],
             validated_outputs=department_validated[department],
             models_used=tuple(active.models_used if active else ()),
-            model_transitions=tuple(model_controller.transitions),
+            model_transitions=tuple(department_model_transitions[department]),
             provider_halted=affects_completion,
             failure_codes=tuple(sorted(set(department_failures[department]))),
         )
@@ -1113,6 +1119,7 @@ def run():
     final_review = review_rendered(
         day=report_day.isoformat(), body=digest_text if args.render else "",
         raw_by_url=raw_by_url, expected_urls={item["url"] for item in digest_items},
+        expected_status_by_url={item["url"]: item["announced_vs_delivered"] for item in digest_items},
     )
     _write(run_dir / "final-review.json", final_review)
     actual_models = model_controller.models_used or [settings.gemini_analysis_model]

@@ -217,6 +217,20 @@ def test_full_daily_run_preserves_36_candidates_and_fails_closed(
     ops = json.loads((run_dir / "ops.json").read_text())
     events = json.loads((run_dir / "provider-request-events.json").read_text())
     failures = json.loads((run_dir / "analysis-failures.json").read_text())
+    # A shared switch belongs only to the desk whose request triggered it.
+    # A desk that completed earlier or inherited the fallback model did not
+    # itself switch, even though the run-wide audit must retain that switch.
+    desk_usage = {desk: json.loads((run_dir / f"departments/{desk}/provider-usage.json").read_text())
+                  for desk in ("china", "global", "macro")}
+    attributed = [transition for usage in desk_usage.values() for transition in usage["model_transitions"]]
+    assert attributed == summary["model_transitions"]
+    for usage in desk_usage.values():
+        assert all(transition["from_model"] in usage["models_used"]
+                   for transition in usage["model_transitions"])
+    if november5:
+        assert desk_usage["macro"]["models_used"] == ["gemini-3.5-flash"]
+        assert desk_usage["china"]["models_used"] == ["gemini-3.5-flash-lite"]
+        assert desk_usage["macro"]["model_transitions"] == desk_usage["china"]["model_transitions"] == []
     if expected_pass:
         from app.daily_ai.email_digest import evaluate_digest
         seal = ops["audit"]["final_review"]

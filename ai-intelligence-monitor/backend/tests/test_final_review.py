@@ -77,6 +77,37 @@ def save_reviewed(tmp_path, prose="五年期2.5亿美元算力承诺。"):
     return path, review
 
 
+@pytest.mark.parametrize("lines", [
+    "", "事实状态：已有实际进展", "事实状态：猜测", "事实状态：仅公告／计划\n事实状态：仅公告／计划",
+])
+def test_missing_changed_unknown_or_duplicate_status_blocks_publication(lines):
+    content = body().replace("75/100", f"75/100\n{lines}")
+    review = review_rendered(day="2026-11-25", body=content, raw_by_url={URL: SOURCE},
+                             expected_status_by_url={URL: "ANNOUNCED_ONLY"})
+    assert "RENDERED_FACT_STATUS_MISMATCH" in {f["error_type"] for f in review["findings"]}
+
+
+@pytest.mark.parametrize("surface,reason", [("html", "RENDERED_FACT_STATUS_MISMATCH"),
+                                            ("text", "PLAIN_TEXT_CONTENT_MISMATCH")])
+def test_swapping_two_card_statuses_blocks_publication(monkeypatch, surface, reason):
+    other_url = "https://example.org/second"
+    content = body().replace("75/100", "75/100\n事实状态：仅公告／计划")
+    second = content[content.index("【算力支持承诺】"):].replace(URL, other_url)
+    content += "\n\n───\n\n" + second.replace("仅公告／计划", "待确认").replace("算力支持承诺", "第二项计划")
+    args = dict(day="2026-11-25", body=content, raw_by_url={URL: SOURCE, other_url: SOURCE},
+                expected_status_by_url={URL: "ANNOUNCED_ONLY", other_url: "UNKNOWN"})
+    assert review_rendered(**args)["passed"]
+
+    def corrupt(day, content):
+        text, markup = render_bodies(day, content)
+        def swap(value):
+            return value.replace("仅公告／计划", "TEMP").replace("待确认", "仅公告／计划").replace("TEMP", "待确认")
+        return (text, swap(markup)) if surface == "html" else (swap(text), markup)
+
+    monkeypatch.setattr("app.daily_ai.email_digest.render_bodies", corrupt)
+    assert reason in {f["error_type"] for f in review_rendered(**args)["findings"]}
+
+
 def test_rendered_review_zero_issues_and_internal_audit_stays_private(tmp_path):
     path, review = save_reviewed(tmp_path)
     assert review["passed"] and review["findings"] == []

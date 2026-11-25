@@ -57,6 +57,7 @@ class EmailDigestItem:
     source_note: str
     other_sources: tuple[str, ...]
     importance_score: int
+    fact_status: str = ""
 
 
 @dataclass(frozen=True)
@@ -166,11 +167,14 @@ def _parse_item(lines: list[str]) -> EmailDigestItem | None:
     source_note = ""
     other_sources: list[str] = []
     importance_score = -1
+    fact_status = ""
     field = "what"
     for value in values[1:]:
         importance = IMPORTANCE_RE.fullmatch(value)
         if importance:
             importance_score = min(100, max(0, int(importance.group(1))))
+        elif value.startswith("事实状态："):
+            fact_status = value.removeprefix("事实状态：").strip()
         elif value.startswith("💡 分析："):
             field = "analysis"
             analysis.append(value.removeprefix("💡 分析：").strip())
@@ -215,6 +219,7 @@ def _parse_item(lines: list[str]) -> EmailDigestItem | None:
         source_note=source_note,
         other_sources=tuple(other_sources),
         importance_score=importance_score,
+        fact_status=fact_status,
     )
 
 
@@ -279,13 +284,15 @@ def _source_label(url: str) -> str:
         return url
 
 
-def _detail_row(label: str, value: str) -> str:
+def _detail_row(label: str, value: str, *, caution: bool = False) -> str:
+    decoration = "background-color:#f5f7f9;border-left:3px solid #a8bac7;padding:12px 14px;" if caution else ""
     return (
         '<tr><td style="padding:0 22px 16px 22px">'
+        f'<div style="{decoration}">'
         f'<div style="font-size:11px;line-height:16px;letter-spacing:.08em;'
         f'color:#375d78;font-weight:700;margin:0 0 5px 0">{html.escape(label)}</div>'
-        f'<div style="font-size:14px;line-height:23px;color:#2c3843;margin:0">'
-        f'{html.escape(value or "未明确列出")}</div></td></tr>'
+        f'<div style="font-size:15px;line-height:25px;color:#2c3843;margin:0">'
+        f'{html.escape(value or "未明确列出")}</div></div></td></tr>'
     )
 
 
@@ -321,9 +328,15 @@ def _render_card(item: EmailDigestItem) -> str:
         )
     else:
         supplemental = '<span style="color:#94a3b8">无</span>'
+    status = (
+        '<tr><td style="padding-top:10px">'
+        '<span style="display:inline-block;padding:4px 9px;border:1px solid #c6d4de;'
+        'background-color:#edf2f6;color:#375d78;font-size:12px;line-height:18px;border-radius:4px">'
+        f'事实状态：{html.escape(item.fact_status)}</span></td></tr>'
+    ) if item.fact_status else ""
 
     return (
-        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+        '<table class="digest-card" role="presentation" width="100%" cellpadding="0" cellspacing="0" '
         'border="0" style="width:100%;border:1px solid #dce3e9;border-collapse:separate;'
         'border-spacing:0;background-color:#ffffff;border-radius:8px;margin:0 0 14px 0">'
         '<tr><td style="padding:19px 22px 15px 18px;border-left:4px solid #4c718b">'
@@ -334,11 +347,11 @@ def _render_card(item: EmailDigestItem) -> str:
         f'<span style="color:#d9972b;font-size:14px;letter-spacing:0">{"★" * stars}</span>'
         f'<span style="color:#cbd5df;font-size:14px;letter-spacing:0">{"☆" * (5 - stars)}</span>'
         f'<span style="padding-left:8px;font-size:11px;line-height:16px;color:#64727e">{score_label}</span>'
-        '</td></tr></table></td></tr>'
+        '</td></tr>' + status + '</table></td></tr>'
         + _detail_row("发生了什么", item.what_happened)
         + _detail_row("产业链解读", item.analysis)
         + _detail_row("涉及公司与传导路径", item.companies_and_path)
-        + _detail_row("风险与不确定性", item.risks_and_uncertainties)
+        + _detail_row("风险与不确定性", item.risks_and_uncertainties, caution=True)
         + '<tr><td style="padding:0 22px 20px 22px">'
         '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
         'border="0" style="width:100%;background-color:#f3f6f8;border-collapse:collapse">'
@@ -369,6 +382,7 @@ def render_bodies(day: str, body: str) -> tuple[str, str]:
     model_label = metadata_match.group(1).strip() if metadata_match else "模型信息未记录"
     prompt_label = metadata_match.group(2).strip() if metadata_match else "Prompt 未记录"
     runtime_label = f"分析模型 {model_label} · {prompt_label}"
+    model_accent = "border-left:3px solid #e0b774;" if " → " in model_label else ""
     section_html = []
     for section in sections:
         cards = "".join(_render_card(item) for item in section.items)
@@ -400,7 +414,7 @@ def render_bodies(day: str, body: str) -> tuple[str, str]:
         '<table role="presentation" width="660" cellpadding="0" cellspacing="0" '
         'border="0" style="width:100%;max-width:660px;background-color:#ffffff;'
         'border-collapse:collapse;border-radius:10px;overflow:hidden">'
-        '<tr><td style="padding:28px 28px 24px 28px;background-color:#243746;'
+        '<tr><td style="padding:26px 24px 24px 24px;background-color:#243746;'
         'border-top:5px solid #607d91">'
         '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" '
         'style="width:100%;border-collapse:collapse"><tr><td style="vertical-align:top">'
@@ -412,7 +426,7 @@ def render_bodies(day: str, body: str) -> tuple[str, str]:
         '每日产业链关键变化与证据摘要</div>'
         f'<div style="font-size:14px;line-height:22px;color:#dbe4ea;margin-top:8px">{html.escape(day)}</div>'
         '<div style="margin-top:14px;padding:9px 12px;background-color:#1b2c39;border:1px solid #536d80;'
-        'font-size:11px;line-height:18px;color:#ffffff;border-radius:4px;word-break:break-word">'
+        f'{model_accent}font-size:12px;line-height:18px;color:#ffffff;border-radius:4px;word-break:break-word">'
         f'{html.escape(runtime_label)}</div></td></tr></table></td></tr>'
         '<tr><td style="padding:18px 24px 10px 24px;background-color:#f5f7f9">'
         '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
